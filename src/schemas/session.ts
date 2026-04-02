@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentStateSchema } from "./agent.ts";
 
 /** Raw session file from ~/.claude/sessions/{pid}.json */
 export const SessionFileSchema = z.object({
@@ -43,6 +44,7 @@ export type SessionRemoved = z.infer<typeof SessionRemovedSchema>;
 export const SnapshotSchema = z.object({
 	type: z.literal("snapshot"),
 	sessions: z.array(SessionInfoSchema),
+	agents: z.array(AgentStateSchema).default([]),
 });
 
 export type Snapshot = z.infer<typeof SnapshotSchema>;

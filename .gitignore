@@ -38,3 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Obsidian
 kb/.obsidian/
+
+# Claude Code worktrees
+.claude/worktrees/
