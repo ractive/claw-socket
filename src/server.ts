@@ -91,18 +91,16 @@ export function createServer(options: ServerOptions = {}) {
 		recoverable: boolean,
 	): void {
 		const ev = envelope("system.error", "", { source, message, recoverable });
-		const stamped = assignSeq(ev);
-		const msg = JSON.stringify(stamped);
+		const { json } = assignSeq(ev);
 		for (const ws of clients) {
-			safeSend(ws, msg);
+			safeSend(ws, json);
 		}
 	}
 
 	function broadcast(event: EventEnvelope): void {
 		registerEventType(event.type);
 
-		const stamped = assignSeq(event);
-		const msg = JSON.stringify(stamped);
+		const { json } = assignSeq(event);
 
 		for (const ws of clients) {
 			const data = ws.data;
@@ -110,7 +108,7 @@ export function createServer(options: ServerOptions = {}) {
 			if (!matchesAny(event.type, data.subscriptions)) continue;
 			if (data.sessionFilter && event.sessionId !== data.sessionFilter)
 				continue;
-			safeSend(ws, msg);
+			safeSend(ws, json);
 		}
 	}
 

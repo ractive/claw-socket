@@ -119,8 +119,8 @@ export class AgentTracker {
 
 	/**
 	 * Handle an event, update agent state, and fire onAgentStateChange if state
-	 * actually changed. Events in SKIP_STATE_CHANGE_TYPES are processed but do
-	 * not trigger the callback.
+	 * actually changed. Events in SKIP_STATE_CHANGE_TYPES are skipped entirely
+	 * since they never affect agent state.
 	 */
 	handleEvent(event: ParsedEvent): void {
 		if (SKIP_STATE_CHANGE_TYPES.has(event.type)) return;

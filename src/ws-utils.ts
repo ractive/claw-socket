@@ -50,24 +50,28 @@ export function makeSafeSend(
 
 export function makeReplayBuffer(maxSize: number) {
 	// Ring buffer: fixed-size array with head/tail indices for O(1) push/eviction
-	const ring = new Array<BufferedEvent | undefined>(maxSize);
+	const effectiveSize = Math.max(1, maxSize);
+	const ring = new Array<BufferedEvent | undefined>(effectiveSize);
 	let head = 0; // index of the oldest entry (next slot to overwrite)
 	let count = 0; // number of valid entries currently stored
 	let nextSeq = 0;
 
-	function assignSeq(ev: EventEnvelope): EventEnvelope & { seq: number } {
+	function assignSeq(ev: EventEnvelope): {
+		stamped: EventEnvelope & { seq: number };
+		json: string;
+	} {
 		const seq = nextSeq++;
 		const stamped = { ...ev, seq };
 		const json = JSON.stringify(stamped);
-		const tail = (head + count) % maxSize;
+		const tail = (head + count) % effectiveSize;
 		ring[tail] = { seq, event: stamped, json };
-		if (count < maxSize) {
+		if (count < effectiveSize) {
 			count++;
 		} else {
 			// Buffer full: advance head to evict oldest entry
-			head = (head + 1) % maxSize;
+			head = (head + 1) % effectiveSize;
 		}
-		return stamped;
+		return { stamped, json };
 	}
 
 	/**
@@ -87,7 +91,7 @@ export function makeReplayBuffer(maxSize: number) {
 
 		while (lo <= hi) {
 			const mid = (lo + hi) >>> 1;
-			const entry = ring[(head + mid) % maxSize] as BufferedEvent;
+			const entry = ring[(head + mid) % effectiveSize] as BufferedEvent;
 			if (entry.seq <= lastSeq) {
 				lo = mid + 1;
 			} else {
@@ -97,7 +101,7 @@ export function makeReplayBuffer(maxSize: number) {
 		}
 
 		for (let i = startOffset; i < count; i++) {
-			cb(ring[(head + i) % maxSize] as BufferedEvent);
+			cb(ring[(head + i) % effectiveSize] as BufferedEvent);
 		}
 	}
 
