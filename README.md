@@ -147,6 +147,18 @@ function reconnect(ws) {
 | `/asyncapi.json` | GET | AsyncAPI spec |
 | `/docs` | GET | AsyncAPI browser UI |
 
+## Security Scanning
+
+[Gitleaks](https://github.com/gitleaks/gitleaks) is used to detect secrets accidentally committed to the repository. CI runs this automatically on every push and pull request.
+
+To run locally:
+
+```bash
+gitleaks detect
+```
+
+Configuration lives in `.gitleaks.toml` at the project root.
+
 ## Development
 
 ```bash

@@ -18,6 +18,16 @@
 			"recommended": true,
 			"complexity": {
 				"useLiteralKeys": "off"
+			},
+			"suspicious": {
+				"recommended": true,
+				"noConsole": "warn",
+				"noExplicitAny": "warn",
+				"noEvolvingTypes": "error",
+				"noSkippedTests": "error",
+				"noFocusedTests": "error",
+				"noMisplacedAssertion": "error",
+				"useAwait": "error"
 			}
 		}
 	},

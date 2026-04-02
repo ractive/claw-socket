@@ -51,8 +51,10 @@ function writeLog(
 		// JSON output: JSON.stringify handles special characters safely.
 		const line = JSON.stringify({ level, ts, msg, ...fields });
 		if (level === "error" || level === "warn") {
+			// biome-ignore lint/suspicious/noConsole: logger module is the designated console output layer
 			console.error(line);
 		} else {
+			// biome-ignore lint/suspicious/noConsole: logger module is the designated console output layer
 			console.log(line);
 		}
 	} else {
@@ -66,8 +68,10 @@ function writeLog(
 				: "";
 		const line = `[${ts}] ${level.toUpperCase()} ${safeMsg}${extra}`;
 		if (level === "error" || level === "warn") {
+			// biome-ignore lint/suspicious/noConsole: logger module is the designated console output layer
 			console.error(line);
 		} else {
+			// biome-ignore lint/suspicious/noConsole: logger module is the designated console output layer
 			console.log(line);
 		}
 	}

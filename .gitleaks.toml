@@ -1,0 +1,13 @@
+title = "claw-socket gitleaks config"
+description = "Secret scanning configuration for the claw-socket project"
+
+[extend]
+# Use the default gitleaks ruleset as the base
+useDefault = true
+
+[allowlist]
+description = "Paths excluded from secret scanning"
+paths = [
+  # Lock files contain hashes that can trigger false positives
+  '''bun\.lock''',
+]
