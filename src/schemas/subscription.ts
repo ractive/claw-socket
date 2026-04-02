@@ -52,6 +52,15 @@ export type SubscribeAgentLogMessage = z.infer<
 	typeof SubscribeAgentLogMessageSchema
 >;
 
+/** Client → server: request usage totals (session or global) */
+export const GetUsageMessageSchema = z.object({
+	type: z.literal("get_usage"),
+	/** If provided, returns usage for this session. Otherwise returns global totals. */
+	sessionId: z.string().optional(),
+});
+
+export type GetUsageMessage = z.infer<typeof GetUsageMessageSchema>;
+
 /** Union of all client → server messages */
 export const ClientMessageSchema = z.discriminatedUnion("type", [
 	SubscribeMessageSchema,
@@ -60,6 +69,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
 	GetSessionListMessageSchema,
 	GetSessionHistoryMessageSchema,
 	SubscribeAgentLogMessageSchema,
+	GetUsageMessageSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

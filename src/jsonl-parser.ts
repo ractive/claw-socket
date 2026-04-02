@@ -154,6 +154,7 @@ export class JsonlParser {
 			typeof message["uuid"] === "string" ? message["uuid"] : undefined;
 		const model =
 			typeof message["model"] === "string" ? message["model"] : undefined;
+		const usage = message["usage"];
 
 		const contentBlocks = Array.isArray(content) ? content : [];
 
@@ -161,6 +162,7 @@ export class JsonlParser {
 			contentBlocks,
 			...(uuid ? { uuid } : {}),
 			...(model ? { model } : {}),
+			...(usage !== undefined ? { usage } : {}),
 		});
 
 		// Track tool_use blocks
@@ -245,6 +247,90 @@ export class JsonlParser {
 			this.emit("session.state_changed", {
 				...(line["state"] !== undefined ? { state: line["state"] } : {}),
 			});
+		} else if (subtype === "rate_limit" || this.isRateLimitLine(line)) {
+			this.emitRateLimitEvent(line);
+		} else if (subtype === "context_window" || this.isContextWindowLine(line)) {
+			this.emitContextWindowEvent(line);
 		}
+	}
+
+	private isRateLimitLine(line: Record<string, unknown>): boolean {
+		return (
+			"retry_after" in line ||
+			"rate_limit_type" in line ||
+			(typeof line["message"] === "string" &&
+				(line["message"] as string).toLowerCase().includes("rate limit"))
+		);
+	}
+
+	private isContextWindowLine(line: Record<string, unknown>): boolean {
+		return (
+			"context_window" in line ||
+			("tokens_used" in line && "tokens_max" in line)
+		);
+	}
+
+	private emitRateLimitEvent(line: Record<string, unknown>): void {
+		const allowed =
+			typeof line["allowed"] === "boolean" ? line["allowed"] : false;
+		const rateLimitType =
+			typeof line["rate_limit_type"] === "string"
+				? line["rate_limit_type"]
+				: typeof line["subtype"] === "string"
+					? line["subtype"]
+					: "unknown";
+		const message =
+			typeof line["message"] === "string" ? line["message"] : "Rate limited";
+		const retryAfter =
+			typeof line["retry_after"] === "number" ? line["retry_after"] : undefined;
+
+		this.emit("usage.rate_limit", {
+			allowed,
+			type: rateLimitType,
+			message,
+			...(retryAfter !== undefined ? { retryAfter } : {}),
+		});
+	}
+
+	private emitContextWindowEvent(line: Record<string, unknown>): void {
+		const contextWindow = line["context_window"];
+		let percentUsed = 0;
+		let tokensUsed = 0;
+		let tokensMax = 0;
+		let categories: Record<string, number> | undefined;
+
+		if (typeof contextWindow === "object" && contextWindow !== null) {
+			const cw = contextWindow as Record<string, unknown>;
+			tokensUsed =
+				typeof cw["tokens_used"] === "number" ? cw["tokens_used"] : 0;
+			tokensMax = typeof cw["tokens_max"] === "number" ? cw["tokens_max"] : 0;
+			if (tokensMax > 0) percentUsed = (tokensUsed / tokensMax) * 100;
+			if (typeof cw["categories"] === "object" && cw["categories"] !== null) {
+				categories = {};
+				const cats = cw["categories"] as Record<string, unknown>;
+				for (const [k, v] of Object.entries(cats)) {
+					if (typeof v === "number") categories[k] = v;
+				}
+			}
+		} else {
+			// Flat format
+			tokensUsed =
+				typeof line["tokens_used"] === "number" ? line["tokens_used"] : 0;
+			tokensMax =
+				typeof line["tokens_max"] === "number" ? line["tokens_max"] : 0;
+			if (tokensMax > 0) percentUsed = (tokensUsed / tokensMax) * 100;
+			const percentRaw =
+				typeof line["percent_used"] === "number"
+					? line["percent_used"]
+					: undefined;
+			if (percentRaw !== undefined) percentUsed = percentRaw;
+		}
+
+		this.emit("usage.context", {
+			percentUsed,
+			tokensUsed,
+			tokensMax,
+			...(categories ? { categories } : {}),
+		});
 	}
 }
