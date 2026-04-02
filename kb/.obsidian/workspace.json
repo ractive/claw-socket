@@ -1,0 +1,204 @@
+{
+  "main": {
+    "id": "2fd01d856a80e765",
+    "type": "split",
+    "children": [
+      {
+        "id": "24295275c4914326",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "3df49467ffeea939",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "iterations/iteration-01-foundation.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "iteration-01-foundation"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "5ed45fd7959c7193",
+    "type": "split",
+    "children": [
+      {
+        "id": "36f82c601fb9f2c4",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d06aff1782b98690",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Dateiexplorer"
+            }
+          },
+          {
+            "id": "0eee640650146f65",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Suchen"
+            }
+          },
+          {
+            "id": "dc6ed827175b637a",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Lesezeichen"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "88ebf9b268c0ee33",
+    "type": "split",
+    "children": [
+      {
+        "id": "6cb260a5de907cba",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "6eeaed6da2b119fc",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "iterations/iteration-01-foundation.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Rückverweise auf iteration-01-foundation"
+            }
+          },
+          {
+            "id": "532113b9c050bea9",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "iterations/iteration-01-foundation.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Ausgehende Links von iteration-01-foundation öffnen"
+            }
+          },
+          {
+            "id": "a648a214c659b2c4",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "b134178c0911f1e4",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "Alle Eigenschaften"
+            }
+          },
+          {
+            "id": "6e3714a70f5dadc8",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "iterations/iteration-01-foundation.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Gliederung von iteration-01-foundation"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Schnellauswahl öffnen": false,
+      "graph:Graph-Ansicht öffnen": false,
+      "canvas:Neuen Canvas erstellen": false,
+      "daily-notes:Heutige Notiz öffnen": false,
+      "templates:Vorlage einfügen": false,
+      "command-palette:Befehlspalette öffnen": false,
+      "bases:Neue Base erstellen": false
+    }
+  },
+  "active": "3df49467ffeea939",
+  "lastOpenFiles": [
+    "research/jsonl-content-and-auth.md",
+    "research/websocket-api-documentation-libraries.md",
+    "research/claude-code-tui-architecture.md",
+    "iterations/iteration-08-polish-packaging.md",
+    "iterations/iteration-07-streaming-events.md",
+    "iterations/iteration-06-asyncapi-docs.md",
+    "iterations/iteration-05-token-cost-tracking.md",
+    "iterations/iteration-04-subscriptions-filtering.md",
+    "iterations/iteration-03-hook-integration.md",
+    "iterations/iteration-02-jsonl-parsing.md",
+    "iterations/iteration-01-foundation.md",
+    "decision-log.md",
+    "research/ws-event-catalog.md",
+    "research/claude-code-internals.md",
+    "research/busy-agents-architecture.md"
+  ]
+}
