@@ -131,9 +131,8 @@ export function createServer(options: ServerOptions = {}) {
 						for (const topic of msg.topics) {
 							ws.data.subscriptions.add(topic);
 						}
-						if (msg.sessionId) {
-							ws.data.sessionFilter = msg.sessionId;
-						}
+						// Set or clear session filter
+						ws.data.sessionFilter = msg.sessionId ?? null;
 						ws.send(
 							JSON.stringify({
 								type: "subscribed",

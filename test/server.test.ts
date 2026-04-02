@@ -1,37 +1,66 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { envelope } from "../src/schemas/envelope.ts";
 import { createServer } from "../src/server.ts";
 
-const PORT = 13838;
 let app: ReturnType<typeof createServer>;
+let port = 0;
 
 beforeAll(async () => {
-	app = createServer({ port: PORT });
+	// Use port 0 to let the OS assign an ephemeral port
+	app = createServer({ port: 0 });
 	await app.start();
+	// biome-ignore lint: port is always assigned after Bun.serve
+	port = app.server.port!;
 });
 
 afterAll(() => {
 	app.stop();
 });
 
-function connectWs(): Promise<WebSocket> {
+/** Create a WebSocket with a buffered message queue so no messages are missed */
+function connectWs(): Promise<{ ws: WebSocket; messages: unknown[] }> {
 	return new Promise((resolve, reject) => {
-		const ws = new WebSocket(`ws://localhost:${PORT}`);
-		ws.onopen = () => resolve(ws);
+		const ws = new WebSocket(`ws://localhost:${port}`);
+		const messages: unknown[] = [];
+		// Buffer messages immediately — before onopen fires
+		ws.addEventListener("message", (e) => {
+			messages.push(JSON.parse(e.data as string));
+		});
+		ws.onopen = () => resolve({ ws, messages });
 		ws.onerror = (e) => reject(e);
 	});
 }
 
-function waitForMessage(ws: WebSocket): Promise<unknown> {
-	return new Promise((resolve) => {
-		ws.onmessage = (e) => resolve(JSON.parse(e.data as string));
+/** Wait until the message buffer has at least `count` entries */
+function waitForMessages(
+	messages: unknown[],
+	count: number,
+	timeoutMs = 2000,
+): Promise<void> {
+	if (messages.length >= count) return Promise.resolve();
+	return new Promise((resolve, reject) => {
+		const start = Date.now();
+		const check = setInterval(() => {
+			if (messages.length >= count) {
+				clearInterval(check);
+				resolve();
+			} else if (Date.now() - start > timeoutMs) {
+				clearInterval(check);
+				reject(
+					new Error(
+						`Timed out waiting for ${count} messages, got ${messages.length}`,
+					),
+				);
+			}
+		}, 10);
 	});
 }
 
 describe("WebSocket server", () => {
 	test("sends snapshot on connect", async () => {
-		const ws = await connectWs();
-		const msg = await waitForMessage(ws);
-		expect(msg).toMatchObject({
+		const { ws, messages } = await connectWs();
+		await waitForMessages(messages, 1);
+		expect(messages[0]).toMatchObject({
 			type: "snapshot",
 			sessions: expect.any(Array),
 		});
@@ -39,109 +68,132 @@ describe("WebSocket server", () => {
 	});
 
 	test("subscribe returns confirmation", async () => {
-		const ws = await connectWs();
-		// Consume snapshot
-		await waitForMessage(ws);
+		const { ws, messages } = await connectWs();
+		await waitForMessages(messages, 1); // snapshot
 
 		ws.send(JSON.stringify({ type: "subscribe", topics: ["session.*"] }));
-		const msg = await waitForMessage(ws);
-		expect(msg).toMatchObject({ type: "subscribed", topics: ["session.*"] });
+		await waitForMessages(messages, 2);
+		expect(messages[1]).toMatchObject({
+			type: "subscribed",
+			topics: ["session.*"],
+		});
 		ws.close();
 	});
 
 	test("unsubscribe returns confirmation", async () => {
-		const ws = await connectWs();
-		await waitForMessage(ws);
+		const { ws, messages } = await connectWs();
+		await waitForMessages(messages, 1); // snapshot
 
 		ws.send(
 			JSON.stringify({ type: "subscribe", topics: ["session.*", "tool.*"] }),
 		);
-		await waitForMessage(ws);
+		await waitForMessages(messages, 2); // subscribed
 
 		ws.send(JSON.stringify({ type: "unsubscribe", topics: ["tool.*"] }));
-		const msg = await waitForMessage(ws);
-		expect(msg).toMatchObject({ type: "unsubscribed", topics: ["session.*"] });
+		await waitForMessages(messages, 3);
+		expect(messages[2]).toMatchObject({
+			type: "unsubscribed",
+			topics: ["session.*"],
+		});
 		ws.close();
 	});
 
 	test("get_snapshot returns current state", async () => {
-		const ws = await connectWs();
-		await waitForMessage(ws);
+		const { ws, messages } = await connectWs();
+		await waitForMessages(messages, 1); // snapshot
 
 		ws.send(JSON.stringify({ type: "get_snapshot" }));
-		const msg = await waitForMessage(ws);
-		expect(msg).toMatchObject({ type: "snapshot" });
+		await waitForMessages(messages, 2);
+		expect(messages[1]).toMatchObject({ type: "snapshot" });
 		ws.close();
 	});
 
 	test("rejects invalid JSON", async () => {
-		const ws = await connectWs();
-		await waitForMessage(ws);
+		const { ws, messages } = await connectWs();
+		await waitForMessages(messages, 1); // snapshot
 
 		ws.send("not json");
-		const msg = await waitForMessage(ws);
-		expect(msg).toMatchObject({ error: "invalid JSON" });
+		await waitForMessages(messages, 2);
+		expect(messages[1]).toMatchObject({ error: "invalid JSON" });
 		ws.close();
 	});
 
 	test("rejects invalid message type", async () => {
-		const ws = await connectWs();
-		await waitForMessage(ws);
+		const { ws, messages } = await connectWs();
+		await waitForMessages(messages, 1); // snapshot
 
 		ws.send(JSON.stringify({ type: "bogus" }));
-		const msg = await waitForMessage(ws);
-		expect(msg).toMatchObject({ error: "invalid message" });
+		await waitForMessages(messages, 2);
+		expect(messages[1]).toMatchObject({ error: "invalid message" });
 		ws.close();
 	});
 
 	test("broadcast only reaches subscribed clients", async () => {
-		const ws1 = await connectWs();
-		const ws2 = await connectWs();
+		const { ws: ws1, messages: msgs1 } = await connectWs();
+		const { ws: ws2, messages: msgs2 } = await connectWs();
+		await waitForMessages(msgs1, 1); // snapshot
+		await waitForMessages(msgs2, 1); // snapshot
 
-		// Collect ALL messages from both sockets
-		const ws1Messages: unknown[] = [];
-		const ws2Messages: unknown[] = [];
-		ws1.onmessage = (e) => ws1Messages.push(JSON.parse(e.data as string));
-		ws2.onmessage = (e) => ws2Messages.push(JSON.parse(e.data as string));
-
-		// Wait for snapshots
-		await new Promise((r) => setTimeout(r, 100));
-
-		// Subscribe
+		// Subscribe ws1 to session.*, ws2 to tool.*
 		ws1.send(JSON.stringify({ type: "subscribe", topics: ["session.*"] }));
 		ws2.send(JSON.stringify({ type: "subscribe", topics: ["tool.*"] }));
+		await waitForMessages(msgs1, 2); // subscribed
+		await waitForMessages(msgs2, 2); // subscribed
 
-		// Wait for subscribe confirmations
-		await new Promise((r) => setTimeout(r, 100));
+		const beforeCount1 = msgs1.length;
+		const beforeCount2 = msgs2.length;
 
-		// Clear collected messages
-		const ws1Before = ws1Messages.length;
-		const ws2Before = ws2Messages.length;
-
-		// Broadcast a session event
-		const { envelope } = await import("../src/schemas/envelope.ts");
+		// Broadcast a session event — only ws1 should receive it
 		app.broadcast(
 			envelope("session.discovered", "test-session", { pid: 9999 }),
 		);
 
-		// Give messages time to arrive
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForMessages(msgs1, beforeCount1 + 1);
+		// Give ws2 a moment to confirm it does NOT receive the message
+		await new Promise((r) => setTimeout(r, 50));
 
-		const ws1New = ws1Messages.slice(ws1Before);
-		const ws2New = ws2Messages.slice(ws2Before);
-
-		expect(ws1New).toHaveLength(1);
-		expect(ws1New[0]).toMatchObject({ type: "session.discovered" });
-		expect(ws2New).toHaveLength(0);
+		expect(msgs1.slice(beforeCount1)).toHaveLength(1);
+		expect(msgs1[beforeCount1]).toMatchObject({ type: "session.discovered" });
+		expect(msgs2.slice(beforeCount2)).toHaveLength(0);
 
 		ws1.close();
 		ws2.close();
+	});
+
+	test("subscribe without sessionId clears previous filter", async () => {
+		const { ws, messages } = await connectWs();
+		await waitForMessages(messages, 1); // snapshot
+
+		// Subscribe with session filter
+		ws.send(
+			JSON.stringify({
+				type: "subscribe",
+				topics: ["session.*"],
+				sessionId: "specific-session",
+			}),
+		);
+		await waitForMessages(messages, 2);
+
+		// Re-subscribe without sessionId to clear filter
+		ws.send(JSON.stringify({ type: "subscribe", topics: ["session.*"] }));
+		await waitForMessages(messages, 3);
+
+		const beforeCount = messages.length;
+
+		// Broadcast to a different session — should now be received
+		app.broadcast(
+			envelope("session.discovered", "other-session", { pid: 1234 }),
+		);
+		await waitForMessages(messages, beforeCount + 1);
+		expect(messages[beforeCount]).toMatchObject({ type: "session.discovered" });
+
+		ws.close();
 	});
 });
 
 describe("Health check", () => {
 	test("/health returns ok", async () => {
-		const res = await fetch(`http://localhost:${PORT}/health`);
+		const res = await fetch(`http://localhost:${port}/health`);
 		const body = await res.json();
 		expect(body).toMatchObject({ status: "ok" });
 	});

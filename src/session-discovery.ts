@@ -37,24 +37,19 @@ export class SessionDiscovery {
 		// Initial scan
 		await this.scanSessions();
 
-		// Watch for new/removed session files
-		try {
-			this.watcher = watch(SESSIONS_DIR, (eventType, filename) => {
-				if (!filename?.endsWith(".json")) return;
-				if (eventType === "rename") {
-					// File added or removed — rescan the specific file
-					this.handleFileChange(filename);
-				}
-			});
-		} catch {
-			// Sessions dir may not exist yet — that's fine
-		}
+		// Try to set up file watcher
+		this.tryStartWatcher();
 
-		// Periodic liveness check
-		this.livenessTimer = setInterval(
-			() => this.checkLiveness(),
-			LIVENESS_INTERVAL_MS,
-		);
+		// Periodic liveness check + watcher retry + rescan
+		this.livenessTimer = setInterval(() => {
+			this.checkLiveness();
+			// Retry watcher if sessions dir appeared after startup
+			if (!this.watcher) {
+				this.tryStartWatcher();
+				// Also rescan since we may have missed file events
+				this.scanSessions().catch(() => {});
+			}
+		}, LIVENESS_INTERVAL_MS);
 	}
 
 	/** Stop watching */
@@ -64,6 +59,19 @@ export class SessionDiscovery {
 		if (this.livenessTimer) {
 			clearInterval(this.livenessTimer);
 			this.livenessTimer = null;
+		}
+	}
+
+	private tryStartWatcher(): void {
+		if (this.watcher) return;
+		try {
+			this.watcher = watch(SESSIONS_DIR, (_eventType, filename) => {
+				if (!filename?.endsWith(".json")) return;
+				// Handle async errors to avoid unhandled rejections
+				this.handleFileChange(filename).catch(() => {});
+			});
+		} catch {
+			// Sessions dir may not exist yet — will retry on next liveness tick
 		}
 	}
 
@@ -149,7 +157,11 @@ function isProcessAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch {
+	} catch (err: unknown) {
+		// EPERM means process exists but we lack permission to signal it
+		if (err instanceof Error && "code" in err && err.code === "EPERM") {
+			return true;
+		}
 		return false;
 	}
 }
