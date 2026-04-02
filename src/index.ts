@@ -8,12 +8,12 @@ await app.start();
 
 // Graceful shutdown
 process.on("SIGINT", () => {
-  console.log("\nShutting down...");
-  app.stop();
-  process.exit(0);
+	console.log("\nShutting down...");
+	app.stop();
+	process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  app.stop();
-  process.exit(0);
+	app.stop();
+	process.exit(0);
 });
