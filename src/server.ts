@@ -11,6 +11,7 @@ import {
 import { SessionDiscovery, type SessionEvent } from "./session-discovery.ts";
 import { deriveJsonlPath, SessionWatcher } from "./session-watcher.ts";
 import { matchesAny, topicMatches } from "./topic-matcher.ts";
+import { UsageTracker } from "./usage-tracker.ts";
 
 /** Maximum JSONL file size to read for session history (10 MB) */
 const MAX_HISTORY_FILE_BYTES = 10 * 1_048_576;
@@ -48,6 +49,10 @@ export function createServer(options: ServerOptions = {}) {
 	 * clients to newly discovered topics automatically.
 	 */
 	const knownEventTypes = new Set<string>();
+
+	const usageTracker = new UsageTracker((type, sessionId, data) => {
+		broadcast(envelope(type, sessionId, data));
+	});
 
 	// -----------------------------------------------------------------------
 	// Backpressure-aware send
@@ -102,6 +107,7 @@ export function createServer(options: ServerOptions = {}) {
 
 	const sessionWatcher = new SessionWatcher({
 		onEvent(event) {
+			usageTracker.handleEvent(event);
 			broadcast(
 				envelope(event.type, event.sessionId, event.data, event.agentId),
 			);
@@ -474,6 +480,64 @@ export function createServer(options: ServerOptions = {}) {
 								sessionId: msg.sessionId,
 							}),
 						);
+						break;
+					}
+
+					case "get_usage": {
+						if (msg.sessionId) {
+							const sessionUsage = usageTracker.getSessionUsage(msg.sessionId);
+							const modelBreakdown: Record<
+								string,
+								{ inputTokens: number; outputTokens: number; costUsd: number }
+							> = {};
+							if (sessionUsage) {
+								for (const [model, usage] of sessionUsage.modelBreakdown) {
+									modelBreakdown[model] = { ...usage };
+								}
+							}
+							safeSend(
+								ws,
+								JSON.stringify({
+									type: "usage",
+									sessionId: msg.sessionId,
+									...(sessionUsage
+										? {
+												inputTokens: sessionUsage.inputTokens,
+												outputTokens: sessionUsage.outputTokens,
+												cacheCreationInputTokens:
+													sessionUsage.cacheCreationInputTokens,
+												cacheReadInputTokens: sessionUsage.cacheReadInputTokens,
+												totalCostUsd: sessionUsage.totalCostUsd,
+												durationMs: sessionUsage.durationMs,
+												durationApiMs: sessionUsage.durationApiMs,
+												numTurns: sessionUsage.numTurns,
+												modelBreakdown,
+												lastUpdatedAt: sessionUsage.lastUpdatedAt,
+											}
+										: {
+												inputTokens: 0,
+												outputTokens: 0,
+												cacheCreationInputTokens: 0,
+												cacheReadInputTokens: 0,
+												totalCostUsd: 0,
+												durationMs: 0,
+												durationApiMs: 0,
+												numTurns: 0,
+												modelBreakdown: {},
+												lastUpdatedAt: null,
+											}),
+								}),
+							);
+						} else {
+							const global = usageTracker.getGlobalUsage();
+							safeSend(
+								ws,
+								JSON.stringify({
+									type: "usage",
+									...global,
+								}),
+							);
+						}
 						break;
 					}
 				}

@@ -1,8 +1,14 @@
 ---
 title: "Iteration 05: Token & Cost Tracking"
-description: Real-time token usage, cost tracking, rate limit events, context window monitoring
-tags: [iteration, tokens, costs, usage]
-status: planned
+description: >-
+  Real-time token usage, cost tracking, rate limit events, context window
+  monitoring
+tags:
+  - iteration
+  - tokens
+  - costs
+  - usage
+status: done
 iteration: 5
 ---
 
@@ -13,12 +19,12 @@ Stream real-time token usage, costs, and rate limit information per session.
 
 ## Tasks
 
-- [ ] Parse token usage from assistant messages (input, output, cache tokens)
-- [ ] Parse result messages for total cost, duration, model usage breakdown
-- [ ] Emit `usage.update` events with running totals
-- [ ] Parse rate limit events from JSONL
-- [ ] Emit `usage.rate_limit` events (allowed, warning, rejected)
-- [ ] Track per-model usage breakdown
-- [ ] Emit `usage.context` events (context window percentage, categories)
-- [ ] Aggregate cost across sessions (global dashboard data)
-- [ ] Tests for usage calculation and rate limit parsing
+- [x] Parse token usage from assistant messages (input, output, cache tokens)
+- [x] Parse result messages for total cost, duration, model usage breakdown
+- [x] Emit `usage.update` events with running totals
+- [x] Parse rate limit events from JSONL
+- [x] Emit `usage.rate_limit` events (allowed, warning, rejected)
+- [x] Track per-model usage breakdown
+- [x] Emit `usage.context` events (context window percentage, categories)
+- [x] Aggregate cost across sessions (global dashboard data)
+- [x] Tests for usage calculation and rate limit parsing
