@@ -2,9 +2,12 @@ import type { ParsedEvent } from "./jsonl-parser.ts";
 import { type HookPayload, HookPayloadSchema } from "./schemas/hook.ts";
 import { truncate } from "./utils.ts";
 
+/** Regex used by toSnakeCase — hoisted to avoid recompilation per call */
+const SNAKE_CASE_RE = /([a-z0-9])([A-Z])/g;
+
 /** Convert PascalCase hook type to snake_case for our event namespace */
 function toSnakeCase(s: string): string {
-	return s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+	return s.replace(SNAKE_CASE_RE, "$1_$2").toLowerCase();
 }
 
 export type HookResult =

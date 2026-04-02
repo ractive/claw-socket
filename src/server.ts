@@ -14,6 +14,7 @@ import {
 	DEFAULT_REPLAY_BUFFER_SIZE,
 	makeReplayBuffer,
 	makeSafeSend,
+	type ReplayBuffer,
 } from "./ws-utils.ts";
 
 /** Heartbeat interval in milliseconds */
@@ -49,7 +50,8 @@ export function createServer(options: ServerOptions = {}) {
 	// Replay buffer and backpressure
 	// -----------------------------------------------------------------------
 
-	const { assignSeq, getBuffer } = makeReplayBuffer(replayBufferSize);
+	const replayBuffer: ReplayBuffer = makeReplayBuffer(replayBufferSize);
+	const { assignSeq } = replayBuffer;
 	const safeSend = makeSafeSend(backpressureDropLimit, backpressureCloseLimit);
 
 	// -----------------------------------------------------------------------
@@ -135,19 +137,9 @@ export function createServer(options: ServerOptions = {}) {
 				broadcastSystemError("session_watcher", String(err), true);
 			}
 		},
-		onAgentStateChange(agents) {
+		onAgentStateChange(sessionId, agents) {
 			try {
-				const bySession = new Map<string, typeof agents>();
-				for (const a of agents) {
-					const list = bySession.get(a.sessionId) ?? [];
-					list.push(a);
-					bySession.set(a.sessionId, list);
-				}
-				for (const [sid, sessionAgents] of bySession) {
-					broadcast(
-						envelope("agent.state_changed", sid, { agents: sessionAgents }),
-					);
-				}
+				broadcast(envelope("agent.state_changed", sessionId, { agents }));
 			} catch (err) {
 				logger.error("error in agent state change handler", {
 					error: String(err),
@@ -264,7 +256,7 @@ export function createServer(options: ServerOptions = {}) {
 				handleMessage(ws, message, {
 					safeSend,
 					sendSnapshot,
-					replayBuffer: getBuffer(),
+					replayBuffer,
 					knownEventTypes,
 					discovery,
 					sessionWatcher,

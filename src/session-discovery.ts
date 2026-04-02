@@ -23,6 +23,8 @@ export class SessionDiscovery {
 	private livenessTimer: ReturnType<typeof setInterval> | null = null;
 	private handler: SessionEventHandler;
 	private readonly sessionsDir: string;
+	/** Cached array — rebuilt only when sessions Map changes */
+	private sessionsCache: SessionInfo[] | null = null;
 
 	constructor(
 		handler: SessionEventHandler,
@@ -32,9 +34,12 @@ export class SessionDiscovery {
 		this.sessionsDir = sessionsDir;
 	}
 
-	/** Get all currently tracked sessions */
+	/** Get all currently tracked sessions (cached; only reallocated on change) */
 	getSessions(): SessionInfo[] {
-		return Array.from(this.sessions.values());
+		if (this.sessionsCache === null) {
+			this.sessionsCache = Array.from(this.sessions.values());
+		}
+		return this.sessionsCache;
 	}
 
 	/** Start watching for sessions */
@@ -103,6 +108,7 @@ export class SessionDiscovery {
 			for (const [id, session] of this.sessions) {
 				if (session.pid === pid) {
 					this.sessions.delete(id);
+					this.sessionsCache = null;
 					this.handler({
 						type: "session.removed",
 						sessionId: id,
@@ -137,6 +143,7 @@ export class SessionDiscovery {
 				discoveredAt: Date.now(),
 			};
 			this.sessions.set(sessionId, session);
+			this.sessionsCache = null;
 			this.handler({ type: "session.discovered", session });
 			return true;
 		} catch {
@@ -148,6 +155,7 @@ export class SessionDiscovery {
 		for (const [id, session] of this.sessions) {
 			if (!isProcessAlive(session.pid)) {
 				this.sessions.delete(id);
+				this.sessionsCache = null;
 				this.handler({
 					type: "session.removed",
 					sessionId: id,

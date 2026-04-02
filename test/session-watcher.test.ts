@@ -33,7 +33,7 @@ describe("SessionWatcher", () => {
 
 		const watcher = new SessionWatcher({
 			onEvent: (e) => events.push(e),
-			onAgentStateChange: (a) => agentChanges.push(a),
+			onAgentStateChange: (_sessionId, agents) => agentChanges.push(agents),
 			trackerOptions: {
 				stalenessThresholdMs: 60_000,
 				stalenessCheckIntervalMs: 60_000,

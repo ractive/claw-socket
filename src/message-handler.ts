@@ -5,13 +5,13 @@ import { readSessionHistory } from "./session-history.ts";
 import type { SessionWatcher } from "./session-watcher.ts";
 import { topicMatches } from "./topic-matcher.ts";
 import type { UsageTracker } from "./usage-tracker.ts";
-import type { BufferedEvent, ClientData } from "./ws-utils.ts";
+import type { ClientData, ReplayBuffer } from "./ws-utils.ts";
 import { sendReplay } from "./ws-utils.ts";
 
 export interface MessageHandlerDeps {
 	safeSend: (ws: ServerWebSocket<ClientData>, msg: string) => void;
 	sendSnapshot: (ws: ServerWebSocket<ClientData>) => void;
-	replayBuffer: readonly BufferedEvent[];
+	replayBuffer: ReplayBuffer;
 	knownEventTypes: Set<string>;
 	discovery: SessionDiscovery;
 	sessionWatcher: SessionWatcher;

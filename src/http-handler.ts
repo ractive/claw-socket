@@ -7,6 +7,15 @@ import type { SessionDiscovery } from "./session-discovery.ts";
 import type { SessionWatcher } from "./session-watcher.ts";
 import type { ClientData } from "./ws-utils.ts";
 
+// Lazily computed on first request — the spec is static for the lifetime of the process
+let asyncApiSpecCache: string | null = null;
+function getAsyncApiSpecJson(): string {
+	if (asyncApiSpecCache === null) {
+		asyncApiSpecCache = JSON.stringify(generateAsyncApiSpec(), null, 2);
+	}
+	return asyncApiSpecCache;
+}
+
 const DOCS_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -55,7 +64,7 @@ export async function handleHttpRequest(
 
 	// AsyncAPI spec
 	if (url.pathname === "/asyncapi.json") {
-		return new Response(JSON.stringify(generateAsyncApiSpec(), null, 2), {
+		return new Response(getAsyncApiSpecJson(), {
 			headers: { "Content-Type": "application/json" },
 		});
 	}
@@ -67,28 +76,11 @@ export async function handleHttpRequest(
 		});
 	}
 
-	// Hook endpoint
+	// Hook endpoint — body size is enforced by Bun's maxRequestBodySize at server level
 	if (req.method === "POST" && url.pathname === "/hook") {
-		const maxBytes = 1_048_576;
-		let text: string;
-		try {
-			text = await req.text();
-		} catch {
-			return new Response(JSON.stringify({ error: "invalid JSON" }), {
-				status: 400,
-				headers: { "Content-Type": "application/json" },
-			});
-		}
-		if (text.length > maxBytes) {
-			return new Response(JSON.stringify({ error: "payload too large" }), {
-				status: 413,
-				headers: { "Content-Type": "application/json" },
-			});
-		}
-
 		let body: unknown;
 		try {
-			body = JSON.parse(text);
+			body = await req.json();
 		} catch {
 			return new Response(JSON.stringify({ error: "invalid JSON" }), {
 				status: 400,

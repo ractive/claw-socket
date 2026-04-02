@@ -19,11 +19,7 @@ export function envelope(
 	data: Record<string, unknown>,
 	agentId?: string,
 ): EventEnvelope {
-	return {
-		type,
-		timestamp: Date.now(),
-		sessionId,
-		data,
-		...(agentId ? { agentId } : {}),
-	};
+	const env: EventEnvelope = { type, timestamp: Date.now(), sessionId, data };
+	if (agentId) env.agentId = agentId;
+	return env;
 }
