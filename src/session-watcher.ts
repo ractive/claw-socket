@@ -11,6 +11,7 @@ import { JsonlWatcher, type JsonlWatcherOptions } from "./jsonl-watcher.ts";
 export interface SessionWatcherOptions {
 	onEvent: (event: ParsedEvent) => void;
 	onAgentStateChange: (agents: AgentState[]) => void;
+	onRawLine?: (sessionId: string, line: Record<string, unknown>) => void;
 	watcherOptions?: JsonlWatcherOptions;
 	trackerOptions?: AgentTrackerOptions;
 }
@@ -18,9 +19,10 @@ export interface SessionWatcherOptions {
 interface WatchedSession {
 	watcher: JsonlWatcher;
 	parser: JsonlParser;
+	jsonlPath: string;
 }
 
-function deriveJsonlPath(sessionId: string, cwd: string): string {
+export function deriveJsonlPath(sessionId: string, cwd: string): string {
 	const projectKey = cwd.replace(/[\\/]/g, "-").replace(/^-/, "");
 	return join(
 		homedir(),
@@ -36,11 +38,15 @@ export class SessionWatcher {
 	private readonly tracker: AgentTracker;
 	private readonly onEvent: (event: ParsedEvent) => void;
 	private readonly onAgentStateChange: (agents: AgentState[]) => void;
+	private readonly onRawLine:
+		| ((sessionId: string, line: Record<string, unknown>) => void)
+		| undefined;
 	private readonly watcherOptions: JsonlWatcherOptions | undefined;
 
 	constructor(options: SessionWatcherOptions) {
 		this.onEvent = options.onEvent;
 		this.onAgentStateChange = options.onAgentStateChange;
+		this.onRawLine = options.onRawLine;
 		this.watcherOptions = options.watcherOptions;
 
 		this.tracker = new AgentTracker(options.trackerOptions);
@@ -65,6 +71,7 @@ export class SessionWatcher {
 			jsonlPath,
 			(line) => {
 				parser.processLine(line);
+				this.onRawLine?.(sessionId, line);
 			},
 			this.watcherOptions,
 		);
@@ -73,7 +80,7 @@ export class SessionWatcher {
 		const agentId = `master-${sessionId}`;
 		this.tracker.registerAgent(agentId, sessionId, "master", cwd);
 
-		this.sessions.set(sessionId, { watcher, parser });
+		this.sessions.set(sessionId, { watcher, parser, jsonlPath });
 		watcher.start();
 	}
 
@@ -112,6 +119,11 @@ export class SessionWatcher {
 
 	getAgents(): AgentState[] {
 		return this.tracker.getAgents();
+	}
+
+	/** Returns the JSONL file path for a watched session, or null if not watched. */
+	getJsonlPath(sessionId: string): string | null {
+		return this.sessions.get(sessionId)?.jsonlPath ?? null;
 	}
 
 	stop(): void {
