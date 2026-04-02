@@ -10,7 +10,10 @@ import {
 } from "./schemas/index.ts";
 import { SessionDiscovery, type SessionEvent } from "./session-discovery.ts";
 import { deriveJsonlPath, SessionWatcher } from "./session-watcher.ts";
-import { matchesAny } from "./topic-matcher.ts";
+import { matchesAny, topicMatches } from "./topic-matcher.ts";
+
+/** Maximum JSONL file size to read for session history (10 MB) */
+const MAX_HISTORY_FILE_BYTES = 10 * 1_048_576;
 
 /** Backpressure drop threshold in bytes (1 MB). Close threshold is 4x this. */
 const DEFAULT_BACKPRESSURE_DROP_BYTES = 1_048_576;
@@ -81,11 +84,7 @@ export function createServer(options: ServerOptions = {}) {
 		// For each client, check if any of their glob patterns match this new type
 		for (const ws of clients) {
 			for (const pattern of ws.data.globPatterns) {
-				// Only subscribe if it's actually a glob (contains * or ?)
-				if (
-					matchesAny(eventType, new Set([pattern])) &&
-					(pattern.includes("*") || pattern.includes("?"))
-				) {
+				if (topicMatches(eventType, pattern)) {
 					// Subscribe to both unfiltered and session-filtered topics
 					ws.subscribe(eventType);
 					if (ws.data.sessionFilter) {
@@ -213,9 +212,15 @@ export function createServer(options: ServerOptions = {}) {
 			return [];
 		}
 
+		const file = Bun.file(jsonlPath);
 		let text: string;
 		try {
-			text = await Bun.file(jsonlPath).text();
+			const size = file.size;
+			if (size > MAX_HISTORY_FILE_BYTES) {
+				// File too large — return empty to avoid DoS via memory exhaustion
+				return [];
+			}
+			text = await file.text();
 		} catch {
 			return [];
 		}
@@ -373,11 +378,11 @@ export function createServer(options: ServerOptions = {}) {
 						for (const topic of msg.topics) {
 							ws.data.subscriptions.add(topic);
 							// Track glob patterns separately for late-binding to new event types
-							if (topic.includes("*") || topic.includes("?")) {
+							if (topic.includes("*")) {
 								ws.data.globPatterns.add(topic);
 								// Subscribe to all already-known event types matching this glob
 								for (const knownType of knownEventTypes) {
-									if (matchesAny(knownType, new Set([topic]))) {
+									if (topicMatches(knownType, topic)) {
 										ws.subscribe(knownType);
 										if (msg.sessionId) {
 											ws.subscribe(`${msg.sessionId}/${knownType}`);
@@ -436,12 +441,27 @@ export function createServer(options: ServerOptions = {}) {
 
 					case "get_session_history": {
 						const { sessionId, limit = 1000 } = msg;
-						readSessionHistory(sessionId, limit).then((events) => {
-							safeSend(
-								ws,
-								JSON.stringify({ type: "session_history", sessionId, events }),
-							);
-						});
+						readSessionHistory(sessionId, limit)
+							.then((events) => {
+								safeSend(
+									ws,
+									JSON.stringify({
+										type: "session_history",
+										sessionId,
+										events,
+									}),
+								);
+							})
+							.catch(() => {
+								safeSend(
+									ws,
+									JSON.stringify({
+										type: "session_history",
+										sessionId,
+										events: [],
+									}),
+								);
+							});
 						break;
 					}
 
