@@ -9,6 +9,10 @@ import type { UsageTracker } from "./usage-tracker.ts";
 import type { ClientData, ReplayBuffer } from "./ws-utils.ts";
 import { sendReplay } from "./ws-utils.ts";
 
+const MAX_CONCURRENT_HISTORY = 2;
+const REPLAY_RATE_LIMIT_MS = 1_000;
+const MAX_RAW_LOG_SUBSCRIPTIONS = 50;
+
 export interface MessageHandlerDeps {
 	safeSend: (ws: ServerWebSocket<ClientData>, msg: string) => void;
 	sendSnapshot: (ws: ServerWebSocket<ClientData>) => void;
@@ -119,7 +123,6 @@ export function handleMessage(
 		}
 
 		case "get_session_history": {
-			const MAX_CONCURRENT_HISTORY = 2;
 			if (ws.data.activeHistoryRequests >= MAX_CONCURRENT_HISTORY) {
 				safeSend(
 					ws,
@@ -160,6 +163,16 @@ export function handleMessage(
 		}
 
 		case "subscribe_agent_log": {
+			if (ws.data.rawLogSessions.size >= MAX_RAW_LOG_SUBSCRIPTIONS) {
+				safeSend(
+					ws,
+					JSON.stringify({
+						error: "limit_exceeded",
+						message: `max ${MAX_RAW_LOG_SUBSCRIPTIONS} agent log subscriptions per client`,
+					}),
+				);
+				break;
+			}
 			ws.data.rawLogSessions.add(msg.sessionId);
 			safeSend(
 				ws,
@@ -246,7 +259,6 @@ export function handleMessage(
 		}
 
 		case "replay": {
-			const REPLAY_RATE_LIMIT_MS = 1000;
 			const now = Date.now();
 			const lastReplayAt = ws.data.lastReplayAt;
 			if (lastReplayAt !== null && now - lastReplayAt < REPLAY_RATE_LIMIT_MS) {
