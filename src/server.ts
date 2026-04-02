@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { generateAsyncApiSpec } from "./asyncapi-generator.ts";
 import { processHookEvent } from "./hook-handler.ts";
 import { JsonlParser, type ParsedEvent } from "./jsonl-parser.ts";
 import { envelope } from "./schemas/envelope.ts";
@@ -277,6 +278,39 @@ export function createServer(options: ServerOptions = {}) {
 						headers: { "Content-Type": "application/json" },
 					},
 				);
+			}
+
+			// AsyncAPI spec
+			if (url.pathname === "/asyncapi.json") {
+				return new Response(JSON.stringify(generateAsyncApiSpec(), null, 2), {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+
+			// AsyncAPI docs UI
+			if (url.pathname === "/docs") {
+				const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>claw-socket API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/@asyncapi/react-component@latest/styles/default.min.css">
+</head>
+<body>
+  <div id="asyncapi"></div>
+  <script src="https://unpkg.com/@asyncapi/react-component@latest/browser/standalone/index.js"></script>
+  <script>
+    AsyncApiComponent.render({
+      schema: { url: '/asyncapi.json' },
+      config: { show: { sidebar: true } }
+    }, document.getElementById('asyncapi'));
+  </script>
+</body>
+</html>`;
+				return new Response(html, {
+					headers: { "Content-Type": "text/html; charset=utf-8" },
+				});
 			}
 
 			// Hook endpoint
