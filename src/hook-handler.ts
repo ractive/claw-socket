@@ -74,6 +74,12 @@ function mapHookToEvents(payload: HookPayload): ParsedEvent[] {
 				toolUseId,
 				inputSummary,
 			});
+			events.push(
+				makeEvent("hook.started", payload, {
+					hookType: "PreToolUse",
+					toolName,
+				}),
+			);
 			break;
 		}
 
@@ -103,6 +109,13 @@ function mapHookToEvents(payload: HookPayload): ParsedEvent[] {
 				toolUseId,
 				outputSummary,
 			});
+			events.push(
+				makeEvent("hook.completed", payload, {
+					hookType: "PostToolUse",
+					toolName,
+					success: true,
+				}),
+			);
 			break;
 		}
 
@@ -118,6 +131,40 @@ function mapHookToEvents(payload: HookPayload): ParsedEvent[] {
 				error,
 				isInterrupt,
 			});
+			events.push(
+				makeEvent("hook.completed", payload, {
+					hookType: "PostToolUseFailure",
+					toolName,
+					success: false,
+				}),
+			);
+			break;
+		}
+
+		case "SessionStart": {
+			// Extract MCP server status if present
+			const mcpServers = data["mcp_servers"];
+			if (Array.isArray(mcpServers)) {
+				for (const server of mcpServers) {
+					if (typeof server !== "object" || server === null) continue;
+					const s = server as Record<string, unknown>;
+					const serverName =
+						typeof s["name"] === "string" ? s["name"] : undefined;
+					if (!serverName) continue;
+					const status =
+						typeof s["status"] === "string" ? s["status"] : "unknown";
+					const url = typeof s["url"] === "string" ? s["url"] : undefined;
+					const tools = Array.isArray(s["tools"]) ? s["tools"] : undefined;
+					events.push(
+						makeEvent("mcp.server_status", payload, {
+							serverName,
+							status,
+							...(url ? { url } : {}),
+							...(tools ? { tools } : {}),
+						}),
+					);
+				}
+			}
 			break;
 		}
 
@@ -177,6 +224,74 @@ function mapHookToEvents(payload: HookPayload): ParsedEvent[] {
 					source: "hook",
 				},
 			});
+			break;
+		}
+
+		case "Elicitation": {
+			const question =
+				typeof data["question"] === "string" ? data["question"] : "";
+			const options = Array.isArray(data["options"])
+				? data["options"]
+				: undefined;
+			const timeout =
+				typeof data["timeout"] === "number" ? data["timeout"] : undefined;
+			const source =
+				typeof data["source"] === "string" ? data["source"] : undefined;
+			events.push(
+				makeEvent("mcp.elicitation", payload, {
+					question,
+					...(options ? { options } : {}),
+					...(timeout !== undefined ? { timeout } : {}),
+					...(source ? { source } : {}),
+				}),
+			);
+			break;
+		}
+
+		case "ElicitationResult": {
+			const answer =
+				typeof data["answer"] === "string" ? data["answer"] : undefined;
+			const source =
+				typeof data["source"] === "string" ? data["source"] : undefined;
+			events.push(
+				makeEvent("mcp.elicitation_result", payload, {
+					...(answer !== undefined ? { answer } : {}),
+					...(source ? { source } : {}),
+				}),
+			);
+			break;
+		}
+
+		case "FileChanged": {
+			const path = typeof data["path"] === "string" ? data["path"] : "";
+			const changeType =
+				typeof data["change_type"] === "string"
+					? data["change_type"]
+					: undefined;
+			events.push(
+				makeEvent("file.changed", payload, {
+					path,
+					...(changeType ? { changeType } : {}),
+				}),
+			);
+			break;
+		}
+
+		case "CwdChanged": {
+			const newCwd =
+				typeof data["cwd"] === "string"
+					? data["cwd"]
+					: typeof data["new_cwd"] === "string"
+						? data["new_cwd"]
+						: "";
+			const oldCwd =
+				typeof data["old_cwd"] === "string" ? data["old_cwd"] : undefined;
+			events.push(
+				makeEvent("cwd.changed", payload, {
+					newCwd,
+					...(oldCwd ? { oldCwd } : {}),
+				}),
+			);
 			break;
 		}
 	}

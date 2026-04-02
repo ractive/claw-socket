@@ -39,7 +39,7 @@ describe("processHookEvent", () => {
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			expect(result.events).toHaveLength(1);
+			expect(result.events).toHaveLength(2);
 			const evt = at(result.events, 0);
 			expect(evt.type).toBe("hook.pre_tool_use");
 			expect(evt.sessionId).toBe(SESSION_ID);
@@ -109,7 +109,7 @@ describe("processHookEvent", () => {
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			expect(result.events).toHaveLength(1);
+			expect(result.events).toHaveLength(2);
 			const evt = at(result.events, 0);
 			expect(evt.type).toBe("hook.post_tool_use");
 			expect(evt.data["toolName"]).toBe("Bash");
@@ -159,7 +159,7 @@ describe("processHookEvent", () => {
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			expect(result.events).toHaveLength(1);
+			expect(result.events).toHaveLength(2);
 			const evt = at(result.events, 0);
 			expect(evt.type).toBe("hook.post_tool_use_failure");
 			expect(evt.data["toolName"]).toBe("Write");
@@ -390,7 +390,7 @@ describe("processHookEvent", () => {
 	});
 
 	describe("FileChanged", () => {
-		test("emits hook.file_changed only", () => {
+		test("emits hook.file_changed and file.changed", () => {
 			const result = processHookEvent(
 				makePayload("FileChanged", { path: "/some/file.ts" }),
 			);
@@ -398,13 +398,14 @@ describe("processHookEvent", () => {
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			expect(result.events).toHaveLength(1);
+			expect(result.events).toHaveLength(2);
 			expect(at(result.events, 0).type).toBe("hook.file_changed");
+			expect(at(result.events, 1).type).toBe("file.changed");
 		});
 	});
 
 	describe("CwdChanged", () => {
-		test("emits hook.cwd_changed only", () => {
+		test("emits hook.cwd_changed and cwd.changed", () => {
 			const result = processHookEvent(
 				makePayload("CwdChanged", { cwd: "/new/dir" }),
 			);
@@ -412,8 +413,9 @@ describe("processHookEvent", () => {
 			expect(result.ok).toBe(true);
 			if (!result.ok) return;
 
-			expect(result.events).toHaveLength(1);
+			expect(result.events).toHaveLength(2);
 			expect(at(result.events, 0).type).toBe("hook.cwd_changed");
+			expect(at(result.events, 1).type).toBe("cwd.changed");
 		});
 	});
 
