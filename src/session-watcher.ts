@@ -86,6 +86,15 @@ export class SessionWatcher {
 		this.sessions.delete(sessionId);
 	}
 
+	/**
+	 * Feed an external event (e.g. from HTTP hooks) into the agent tracker.
+	 * Only agent-lifecycle and tool events are processed; others are ignored.
+	 */
+	handleExternalEvent(event: ParsedEvent): void {
+		this.tracker.handleEvent(event);
+		this.onAgentStateChange(this.tracker.getAgents());
+	}
+
 	getAgents(): AgentState[] {
 		return this.tracker.getAgents();
 	}

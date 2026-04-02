@@ -179,6 +179,104 @@ export class AgentTracker {
 				break;
 			}
 
+			case "hook.pre_tool_use": {
+				if (!agent) break;
+				this.markActive(agent);
+				agent.status = "tool_running";
+				const toolName = event.data["toolName"] ?? event.data["tool_name"];
+				const toolInput = event.data["inputSummary"];
+				const toolUseId = event.data["toolUseId"] ?? event.data["tool_use_id"];
+				if (typeof toolName === "string") {
+					agent.currentTool = toolName;
+				}
+				if (typeof toolInput === "string") {
+					agent.currentToolInput = toolInput;
+				}
+				if (typeof toolUseId === "string") {
+					this.inFlightTools.set(toolUseId, {
+						toolName: typeof toolName === "string" ? toolName : "unknown",
+						inputSummary: typeof toolInput === "string" ? toolInput : "",
+						startedAt: Date.now(),
+					});
+				}
+				break;
+			}
+
+			case "hook.post_tool_use": {
+				if (!agent) break;
+				this.markActive(agent);
+				agent.status = "working";
+				const toolUseIdVal =
+					event.data["toolUseId"] ?? event.data["tool_use_id"];
+				const tracked =
+					typeof toolUseIdVal === "string"
+						? this.inFlightTools.get(toolUseIdVal)
+						: undefined;
+				if (typeof toolUseIdVal === "string") {
+					this.inFlightTools.delete(toolUseIdVal);
+				}
+				const toolName =
+					tracked?.toolName ??
+					event.data["toolName"] ??
+					event.data["tool_name"];
+				const inputSummary = tracked?.inputSummary ?? "";
+				const startedAtVal = tracked?.startedAt;
+				this.addToolHistory(agent, {
+					toolName: typeof toolName === "string" ? toolName : "unknown",
+					inputSummary: typeof inputSummary === "string" ? inputSummary : "",
+					durationMs:
+						typeof startedAtVal === "number" ? Date.now() - startedAtVal : 0,
+					success: true,
+					startedAt:
+						typeof startedAtVal === "number" ? startedAtVal : Date.now(),
+				});
+				agent.toolCount += 1;
+				delete agent.currentTool;
+				delete agent.currentToolInput;
+				break;
+			}
+
+			case "hook.post_tool_use_failure": {
+				if (!agent) break;
+				this.markActive(agent);
+				agent.status = "working";
+				const toolUseIdVal =
+					event.data["toolUseId"] ?? event.data["tool_use_id"];
+				const tracked =
+					typeof toolUseIdVal === "string"
+						? this.inFlightTools.get(toolUseIdVal)
+						: undefined;
+				if (typeof toolUseIdVal === "string") {
+					this.inFlightTools.delete(toolUseIdVal);
+				}
+				const toolName =
+					tracked?.toolName ??
+					event.data["toolName"] ??
+					event.data["tool_name"];
+				const inputSummary = tracked?.inputSummary ?? "";
+				const startedAtVal = tracked?.startedAt;
+				this.addToolHistory(agent, {
+					toolName: typeof toolName === "string" ? toolName : "unknown",
+					inputSummary: typeof inputSummary === "string" ? inputSummary : "",
+					durationMs:
+						typeof startedAtVal === "number" ? Date.now() - startedAtVal : 0,
+					success: false,
+					startedAt:
+						typeof startedAtVal === "number" ? startedAtVal : Date.now(),
+				});
+				agent.toolCount += 1;
+				delete agent.currentTool;
+				delete agent.currentToolInput;
+				break;
+			}
+
+			case "hook.session_end": {
+				if (!agent) break;
+				agent.status = "offline";
+				agent.lastActivityAt = Date.now();
+				break;
+			}
+
 			case "message.assistant": {
 				if (!agent) break;
 				this.markActive(agent);

@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { processHookEvent } from "./hook-handler.ts";
 import { envelope } from "./schemas/envelope.ts";
 import {
 	ClientMessageSchema,
@@ -92,7 +93,7 @@ export function createServer(options: ServerOptions = {}) {
 	const server = Bun.serve<ClientData>({
 		port,
 		hostname,
-		fetch(req, server) {
+		async fetch(req, server) {
 			const url = new URL(req.url);
 
 			// Health check
@@ -105,6 +106,48 @@ export function createServer(options: ServerOptions = {}) {
 					{
 						headers: { "Content-Type": "application/json" },
 					},
+				);
+			}
+
+			// Hook endpoint
+			if (req.method === "POST" && url.pathname === "/hook") {
+				const contentLength = Number(req.headers.get("content-length") ?? 0);
+				if (contentLength > 1_048_576) {
+					return new Response(JSON.stringify({ error: "payload too large" }), {
+						status: 413,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+
+				let body: unknown;
+				try {
+					body = await req.json();
+				} catch {
+					return new Response(JSON.stringify({ error: "invalid JSON" }), {
+						status: 400,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+
+				const result = processHookEvent(body);
+				if (!result.ok) {
+					return new Response(
+						JSON.stringify({ error: "invalid hook payload" }),
+						{ status: 400, headers: { "Content-Type": "application/json" } },
+					);
+				}
+
+				for (const event of result.events) {
+					// Feed agent-tracker-compatible events through sessionWatcher
+					sessionWatcher.handleExternalEvent(event);
+					broadcast(
+						envelope(event.type, event.sessionId, event.data, event.agentId),
+					);
+				}
+
+				return new Response(
+					JSON.stringify({ status: "ok", eventsEmitted: result.events.length }),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
 				);
 			}
 
