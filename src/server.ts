@@ -1,30 +1,104 @@
 import type { ServerWebSocket } from "bun";
 import { processHookEvent } from "./hook-handler.ts";
+import { JsonlParser, type ParsedEvent } from "./jsonl-parser.ts";
 import { envelope } from "./schemas/envelope.ts";
 import {
 	ClientMessageSchema,
 	type EventEnvelope,
+	type SessionInfo,
 	type Snapshot,
 } from "./schemas/index.ts";
 import { SessionDiscovery, type SessionEvent } from "./session-discovery.ts";
-import { SessionWatcher } from "./session-watcher.ts";
-import { matchesAny } from "./topic-matcher.ts";
+import { deriveJsonlPath, SessionWatcher } from "./session-watcher.ts";
+import { matchesAny, topicMatches } from "./topic-matcher.ts";
+
+/** Maximum JSONL file size to read for session history (10 MB) */
+const MAX_HISTORY_FILE_BYTES = 10 * 1_048_576;
+
+/** Backpressure drop threshold in bytes (1 MB). Close threshold is 4x this. */
+const DEFAULT_BACKPRESSURE_DROP_BYTES = 1_048_576;
 
 interface ClientData {
 	subscriptions: Set<string>;
 	sessionFilter: string | null;
+	/** Glob patterns stored for matching new event types discovered at runtime */
+	globPatterns: Set<string>;
+	/** Sessions the client wants to receive raw JSONL lines for */
+	rawLogSessions: Set<string>;
 }
 
 export interface ServerOptions {
 	port?: number;
 	hostname?: string;
+	/** Buffer bytes above which a message is dropped for a slow client (default 1 MB) */
+	backpressureLimit?: number;
 }
 
 export function createServer(options: ServerOptions = {}) {
 	const port = options.port ?? 3838;
 	const hostname = options.hostname ?? "localhost";
+	const backpressureDropLimit =
+		options.backpressureLimit ?? DEFAULT_BACKPRESSURE_DROP_BYTES;
+	const backpressureCloseLimit = backpressureDropLimit * 4;
 
 	const clients = new Set<ServerWebSocket<ClientData>>();
+
+	/**
+	 * All event types that have ever been seen. Used to subscribe glob-pattern
+	 * clients to newly discovered topics automatically.
+	 */
+	const knownEventTypes = new Set<string>();
+
+	// -----------------------------------------------------------------------
+	// Backpressure-aware send
+	// -----------------------------------------------------------------------
+
+	function safeSend(ws: ServerWebSocket<ClientData>, msg: string): void {
+		const buffered = ws.getBufferedAmount();
+		if (buffered >= backpressureCloseLimit) {
+			console.warn(`[backpressure] closing slow client (buffered=${buffered})`);
+			ws.close(1008, "backpressure limit exceeded");
+			return;
+		}
+		if (buffered >= backpressureDropLimit) {
+			console.warn(
+				`[backpressure] dropping message for slow client (buffered=${buffered})`,
+			);
+			return;
+		}
+		ws.send(msg);
+	}
+
+	// -----------------------------------------------------------------------
+	// Pub/sub helpers
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Register a new event type. For any connected client whose glob patterns
+	 * match the new type, subscribe them to the Bun pub/sub topic.
+	 */
+	function registerEventType(eventType: string): void {
+		if (knownEventTypes.has(eventType)) return;
+		knownEventTypes.add(eventType);
+
+		// For each client, check if any of their glob patterns match this new type
+		for (const ws of clients) {
+			for (const pattern of ws.data.globPatterns) {
+				if (topicMatches(eventType, pattern)) {
+					// Subscribe to both unfiltered and session-filtered topics
+					ws.subscribe(eventType);
+					if (ws.data.sessionFilter) {
+						ws.subscribe(`${ws.data.sessionFilter}/${eventType}`);
+					}
+					break;
+				}
+			}
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Session watcher
+	// -----------------------------------------------------------------------
 
 	const sessionWatcher = new SessionWatcher({
 		onEvent(event) {
@@ -43,6 +117,19 @@ export function createServer(options: ServerOptions = {}) {
 				broadcast(
 					envelope("agent.state_changed", sid, { agents: sessionAgents }),
 				);
+			}
+		},
+		onRawLine(sessionId, line) {
+			// Forward raw JSONL lines to clients subscribed via subscribe_agent_log
+			const msg = JSON.stringify({
+				type: "agent_log",
+				sessionId,
+				line,
+			});
+			for (const ws of clients) {
+				if (ws.data.rawLogSessions.has(sessionId)) {
+					safeSend(ws, msg);
+				}
 			}
 		},
 	});
@@ -67,19 +154,28 @@ export function createServer(options: ServerOptions = {}) {
 		}
 	});
 
+	// -----------------------------------------------------------------------
+	// Broadcast
+	// -----------------------------------------------------------------------
+
 	function broadcast(event: EventEnvelope): void {
+		registerEventType(event.type);
+
 		const msg = JSON.stringify(event);
+
 		for (const ws of clients) {
 			const data = ws.data;
-			// Check subscription match
 			if (data.subscriptions.size === 0) continue;
 			if (!matchesAny(event.type, data.subscriptions)) continue;
-			// Check session filter
 			if (data.sessionFilter && event.sessionId !== data.sessionFilter)
 				continue;
-			ws.send(msg);
+			safeSend(ws, msg);
 		}
 	}
+
+	// -----------------------------------------------------------------------
+	// Snapshot
+	// -----------------------------------------------------------------------
 
 	function sendSnapshot(ws: ServerWebSocket<ClientData>): void {
 		const snapshot: Snapshot = {
@@ -87,8 +183,76 @@ export function createServer(options: ServerOptions = {}) {
 			sessions: discovery.getSessions(),
 			agents: sessionWatcher.getAgents(),
 		};
-		ws.send(JSON.stringify(snapshot));
+		safeSend(ws, JSON.stringify(snapshot));
 	}
+
+	// -----------------------------------------------------------------------
+	// get_session_history helper
+	// -----------------------------------------------------------------------
+
+	async function readSessionHistory(
+		sessionId: string,
+		limit: number,
+	): Promise<ParsedEvent[]> {
+		// Try to get the path from the watcher (session is currently active)
+		let jsonlPath = sessionWatcher.getJsonlPath(sessionId);
+
+		// Fall back: look up from discovery (session may still be in discovery map)
+		if (!jsonlPath) {
+			const sessions = discovery.getSessions();
+			const found = sessions.find(
+				(s: SessionInfo) => s.sessionId === sessionId,
+			);
+			if (found) {
+				jsonlPath = deriveJsonlPath(sessionId, found.cwd);
+			}
+		}
+
+		if (!jsonlPath) {
+			return [];
+		}
+
+		const file = Bun.file(jsonlPath);
+		let text: string;
+		try {
+			const size = file.size;
+			if (size > MAX_HISTORY_FILE_BYTES) {
+				// File too large — return empty to avoid DoS via memory exhaustion
+				return [];
+			}
+			text = await file.text();
+		} catch {
+			return [];
+		}
+
+		const events: ParsedEvent[] = [];
+		const parser = new JsonlParser(sessionId, (event) => {
+			events.push(event);
+		});
+
+		for (const rawLine of text.split("\n")) {
+			const trimmed = rawLine.trim();
+			if (!trimmed) continue;
+			try {
+				const parsed: unknown = JSON.parse(trimmed);
+				if (
+					typeof parsed === "object" &&
+					parsed !== null &&
+					!Array.isArray(parsed)
+				) {
+					parser.processLine(parsed as Record<string, unknown>);
+				}
+			} catch {
+				// Skip malformed lines
+			}
+		}
+
+		return limit > 0 ? events.slice(-limit) : events;
+	}
+
+	// -----------------------------------------------------------------------
+	// Bun server
+	// -----------------------------------------------------------------------
 
 	const server = Bun.serve<ClientData>({
 		port,
@@ -162,7 +326,12 @@ export function createServer(options: ServerOptions = {}) {
 
 			// WebSocket upgrade
 			const upgraded = server.upgrade(req, {
-				data: { subscriptions: new Set(), sessionFilter: null },
+				data: {
+					subscriptions: new Set(),
+					sessionFilter: null,
+					globPatterns: new Set(),
+					rawLogSessions: new Set(),
+				},
 			});
 			if (!upgraded) {
 				return new Response("WebSocket upgrade failed", { status: 400 });
@@ -186,13 +355,14 @@ export function createServer(options: ServerOptions = {}) {
 				try {
 					parsed = JSON.parse(text);
 				} catch {
-					ws.send(JSON.stringify({ error: "invalid JSON" }));
+					safeSend(ws, JSON.stringify({ error: "invalid JSON" }));
 					return;
 				}
 
 				const result = ClientMessageSchema.safeParse(parsed);
 				if (!result.success) {
-					ws.send(
+					safeSend(
+						ws,
 						JSON.stringify({
 							error: "invalid message",
 							details: result.error.issues,
@@ -204,35 +374,108 @@ export function createServer(options: ServerOptions = {}) {
 				const msg = result.data;
 
 				switch (msg.type) {
-					case "subscribe":
+					case "subscribe": {
 						for (const topic of msg.topics) {
 							ws.data.subscriptions.add(topic);
+							// Track glob patterns separately for late-binding to new event types
+							if (topic.includes("*")) {
+								ws.data.globPatterns.add(topic);
+								// Subscribe to all already-known event types matching this glob
+								for (const knownType of knownEventTypes) {
+									if (topicMatches(knownType, topic)) {
+										ws.subscribe(knownType);
+										if (msg.sessionId) {
+											ws.subscribe(`${msg.sessionId}/${knownType}`);
+										}
+									}
+								}
+							} else {
+								// Exact topic — subscribe directly to Bun pub/sub
+								ws.subscribe(topic);
+								if (msg.sessionId) {
+									ws.subscribe(`${msg.sessionId}/${topic}`);
+								}
+							}
 						}
 						// Set or clear session filter
 						ws.data.sessionFilter = msg.sessionId ?? null;
-						ws.send(
+						safeSend(
+							ws,
 							JSON.stringify({
 								type: "subscribed",
 								topics: Array.from(ws.data.subscriptions),
 							}),
 						);
 						break;
+					}
 
-					case "unsubscribe":
+					case "unsubscribe": {
 						for (const topic of msg.topics) {
 							ws.data.subscriptions.delete(topic);
+							ws.data.globPatterns.delete(topic);
+							ws.unsubscribe(topic);
+							// Unsubscribe from any session-prefixed variants
+							if (ws.data.sessionFilter) {
+								ws.unsubscribe(`${ws.data.sessionFilter}/${topic}`);
+							}
 						}
-						ws.send(
+						safeSend(
+							ws,
 							JSON.stringify({
 								type: "unsubscribed",
 								topics: Array.from(ws.data.subscriptions),
 							}),
 						);
 						break;
+					}
 
 					case "get_snapshot":
 						sendSnapshot(ws);
 						break;
+
+					case "get_session_list": {
+						const sessions = discovery.getSessions();
+						safeSend(ws, JSON.stringify({ type: "session_list", sessions }));
+						break;
+					}
+
+					case "get_session_history": {
+						const { sessionId, limit = 1000 } = msg;
+						readSessionHistory(sessionId, limit)
+							.then((events) => {
+								safeSend(
+									ws,
+									JSON.stringify({
+										type: "session_history",
+										sessionId,
+										events,
+									}),
+								);
+							})
+							.catch(() => {
+								safeSend(
+									ws,
+									JSON.stringify({
+										type: "session_history",
+										sessionId,
+										events: [],
+									}),
+								);
+							});
+						break;
+					}
+
+					case "subscribe_agent_log": {
+						ws.data.rawLogSessions.add(msg.sessionId);
+						safeSend(
+							ws,
+							JSON.stringify({
+								type: "subscribed_agent_log",
+								sessionId: msg.sessionId,
+							}),
+						);
+						break;
+					}
 				}
 			},
 		},

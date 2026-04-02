@@ -1,8 +1,11 @@
 ---
 title: "Iteration 04: Subscriptions & Filtering"
 description: Topic-based subscriptions, session filtering, request/response protocol
-tags: [iteration, subscriptions, filtering]
-status: planned
+tags:
+  - iteration
+  - subscriptions
+  - filtering
+status: done
 iteration: 4
 ---
 
@@ -13,13 +16,13 @@ Full subscription model so clients get exactly the events they need, plus reques
 
 ## Tasks
 
-- [ ] Glob-style topic matching (`session.*`, `tool.started`, `*`)
-- [ ] Session-scoped subscriptions (filter events to one session)
-- [ ] Multiple concurrent subscriptions per client
-- [ ] Request/response: `get_snapshot` (current state)
-- [ ] Request/response: `get_session_history` (past events from JSONL)
-- [ ] Request/response: `get_session_list` (all known sessions with metadata)
-- [ ] Request/response: `subscribe_agent_log` (raw JSONL lines for an agent)
-- [ ] Bun pub/sub topic mapping (leverage native `.subscribe()` / `.publish()`)
-- [ ] Backpressure handling (slow clients)
-- [ ] Tests for subscription matching and filtering
+- [x] Glob-style topic matching (`session.*`, `tool.started`, `*`)
+- [x] Session-scoped subscriptions (filter events to one session)
+- [x] Multiple concurrent subscriptions per client
+- [x] Request/response: `get_snapshot` (current state)
+- [x] Request/response: `get_session_history` (past events from JSONL)
+- [x] Request/response: `get_session_list` (all known sessions with metadata)
+- [x] Request/response: `subscribe_agent_log` (raw JSONL lines for an agent)
+- [x] Bun pub/sub topic mapping (leverage native `.subscribe()` / `.publish()`)
+- [x] Backpressure handling (slow clients)
+- [x] Tests for subscription matching and filtering
