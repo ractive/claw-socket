@@ -86,11 +86,26 @@ export class SessionWatcher {
 		this.sessions.delete(sessionId);
 	}
 
+	/** Event types that the agent tracker actually handles */
+	private static readonly TRACKER_EVENTS = new Set([
+		"agent.started",
+		"agent.stopped",
+		"tool.started",
+		"tool.completed",
+		"tool.failed",
+		"hook.pre_tool_use",
+		"hook.post_tool_use",
+		"hook.post_tool_use_failure",
+		"message.assistant",
+		"message.result",
+	]);
+
 	/**
 	 * Feed an external event (e.g. from HTTP hooks) into the agent tracker.
-	 * Only agent-lifecycle and tool events are processed; others are ignored.
+	 * Only broadcasts agent state changes for events the tracker handles.
 	 */
 	handleExternalEvent(event: ParsedEvent): void {
+		if (!SessionWatcher.TRACKER_EVENTS.has(event.type)) return;
 		this.tracker.handleEvent(event);
 		this.onAgentStateChange(this.tracker.getAgents());
 	}

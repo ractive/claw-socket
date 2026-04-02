@@ -111,8 +111,17 @@ export function createServer(options: ServerOptions = {}) {
 
 			// Hook endpoint
 			if (req.method === "POST" && url.pathname === "/hook") {
-				const contentLength = Number(req.headers.get("content-length") ?? 0);
-				if (contentLength > 1_048_576) {
+				const maxBytes = 1_048_576;
+				let text: string;
+				try {
+					text = await req.text();
+				} catch {
+					return new Response(JSON.stringify({ error: "invalid JSON" }), {
+						status: 400,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				if (text.length > maxBytes) {
 					return new Response(JSON.stringify({ error: "payload too large" }), {
 						status: 413,
 						headers: { "Content-Type": "application/json" },
@@ -121,7 +130,7 @@ export function createServer(options: ServerOptions = {}) {
 
 				let body: unknown;
 				try {
-					body = await req.json();
+					body = JSON.parse(text);
 				} catch {
 					return new Response(JSON.stringify({ error: "invalid JSON" }), {
 						status: 400,

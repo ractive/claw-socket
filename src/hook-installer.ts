@@ -1,6 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { HookEventTypeSchema } from "./schemas/hook.ts";
 
 const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
@@ -16,21 +16,26 @@ export interface InstallResult {
 	previouslyInstalled: boolean;
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 async function readSettings(): Promise<Record<string, unknown>> {
+	let content: string;
 	try {
-		const content = await readFile(SETTINGS_PATH, "utf-8");
-		return JSON.parse(content) as Record<string, unknown>;
-	} catch {
-		return {};
+		content = await readFile(SETTINGS_PATH, "utf-8");
+	} catch (err: unknown) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+		throw err;
 	}
+	return JSON.parse(content) as Record<string, unknown>;
 }
 
 async function writeSettings(settings: Record<string, unknown>): Promise<void> {
-	await writeFile(
-		SETTINGS_PATH,
-		`${JSON.stringify(settings, null, 2)}\n`,
-		"utf-8",
-	);
+	await mkdir(dirname(SETTINGS_PATH), { recursive: true });
+	const tmpPath = join(tmpdir(), `claude-settings-${Date.now()}.tmp`);
+	await writeFile(tmpPath, `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
+	await rename(tmpPath, SETTINGS_PATH);
 }
 
 /**
@@ -44,7 +49,8 @@ export async function installHook(
 	const hookUrl = `http://localhost:${port}/hook`;
 	const settings = await readSettings();
 
-	const hooks = (settings["hooks"] as Record<string, unknown>) ?? {};
+	const existing = settings["hooks"];
+	const hooks = isPlainObject(existing) ? existing : {};
 	const previouslyInstalled = HOOK_NAME in hooks;
 
 	// Build hook config: each event type maps to a command array
@@ -81,14 +87,14 @@ export async function uninstallHook(
 	options: { dryRun?: boolean } = {},
 ): Promise<boolean> {
 	const settings = await readSettings();
-	const hooks = settings["hooks"] as Record<string, unknown> | undefined;
+	const existing = settings["hooks"];
 
-	if (!hooks || !(HOOK_NAME in hooks)) {
+	if (!isPlainObject(existing) || !(HOOK_NAME in existing)) {
 		return false;
 	}
 
-	delete hooks[HOOK_NAME];
-	settings["hooks"] = hooks;
+	delete existing[HOOK_NAME];
+	settings["hooks"] = existing;
 
 	if (!options.dryRun) {
 		await writeSettings(settings);

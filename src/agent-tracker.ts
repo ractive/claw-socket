@@ -270,13 +270,6 @@ export class AgentTracker {
 				break;
 			}
 
-			case "hook.session_end": {
-				if (!agent) break;
-				agent.status = "offline";
-				agent.lastActivityAt = Date.now();
-				break;
-			}
-
 			case "message.assistant": {
 				if (!agent) break;
 				this.markActive(agent);
