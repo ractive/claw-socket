@@ -227,7 +227,7 @@ export function createServer(options: ServerOptions = {}) {
 		port,
 		hostname,
 		maxRequestBodySize: 1_048_576, // 1 MB — enforced at the Bun level before buffering
-		async fetch(req, server) {
+		fetch(req, server) {
 			return handleHttpRequest(req, server, {
 				discovery,
 				sessionWatcher,

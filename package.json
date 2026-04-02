@@ -2,9 +2,31 @@
   "name": "claw-socket",
   "version": "0.1.0",
   "description": "Real-time WebSocket bridge that streams Claude Code events to any connected client",
+  "author": "ractive",
+  "license": "MIT",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "websocket",
+    "real-time",
+    "events",
+    "streaming",
+    "mcp",
+    "anthropic"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ractive/claw-socket.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ractive/claw-socket/issues"
+  },
+  "homepage": "https://github.com/ractive/claw-socket#readme",
+  "engines": {
+    "bun": ">=1.0"
+  },
   "module": "src/index.ts",
   "type": "module",
-  "license": "MIT",
   "bin": {
     "claw-socket": "src/index.ts"
   },
@@ -19,7 +41,7 @@
     "build": "bun build src/index.ts --compile --outfile claw-socket",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "check": "bunx biome check --write src/ test/ && bun run typecheck && bun test"
+    "check": "bunx biome check --write src/ test/ && bun run typecheck && bun test && bun audit"
   },
   "dependencies": {
     "zod": "^3.24",
@@ -27,9 +49,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.10",
-    "@types/bun": "latest"
+    "@types/bun": "1.3.11"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5 || ^6"
   }
 }

@@ -41,6 +41,7 @@ export function parseArgs(argv: string[]): CliOptions {
 				const val = args[++i];
 				const n = parseInt(val ?? "", 10);
 				if (Number.isNaN(n) || n <= 0 || n > 65535) {
+					// biome-ignore lint/suspicious/noConsole: CLI error output before logger is initialised
 					console.error(`Invalid port: ${val}`);
 					process.exit(1);
 				}
@@ -50,6 +51,7 @@ export function parseArgs(argv: string[]): CliOptions {
 			case "--host": {
 				const val = args[++i];
 				if (!val) {
+					// biome-ignore lint/suspicious/noConsole: CLI error output before logger is initialised
 					console.error("--host requires a value");
 					process.exit(1);
 				}
@@ -70,10 +72,12 @@ export function parseArgs(argv: string[]): CliOptions {
 				process.exit(0);
 				break;
 			case "--version":
+				// biome-ignore lint/suspicious/noConsole: CLI version output before logger is initialised
 				console.log(VERSION);
 				process.exit(0);
 				break;
 			default:
+				// biome-ignore lint/suspicious/noConsole: CLI error output before logger is initialised
 				console.error(`Unknown option: ${arg}`);
 				process.stderr.write(HELP);
 				process.exit(1);
