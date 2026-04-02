@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 import { generateAsyncApiSpec } from "./asyncapi-generator.ts";
 import { processHookEvent } from "./hook-handler.ts";
 import { JsonlParser, type ParsedEvent } from "./jsonl-parser.ts";
+import { logger } from "./logger.ts";
 import { envelope } from "./schemas/envelope.ts";
 import {
 	ClientMessageSchema,
@@ -20,6 +21,18 @@ const MAX_HISTORY_FILE_BYTES = 10 * 1_048_576;
 /** Backpressure drop threshold in bytes (1 MB). Close threshold is 4x this. */
 const DEFAULT_BACKPRESSURE_DROP_BYTES = 1_048_576;
 
+/** Heartbeat interval in milliseconds */
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
+/** How long to wait for a pong after a ping before closing (ms) */
+const PONG_TIMEOUT_MS = 10_000;
+
+/** Default replay buffer size (number of events) */
+const DEFAULT_REPLAY_BUFFER_SIZE = 1000;
+
+/** Grace period for graceful shutdown (ms) */
+const SHUTDOWN_GRACE_MS = 3_000;
+
 interface ClientData {
 	subscriptions: Set<string>;
 	sessionFilter: string | null;
@@ -27,6 +40,10 @@ interface ClientData {
 	globPatterns: Set<string>;
 	/** Sessions the client wants to receive raw JSONL lines for */
 	rawLogSessions: Set<string>;
+	/** Last ping time (ms), used for pong tracking */
+	lastPingAt: number | null;
+	/** Timer handle for pong timeout */
+	pongTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export interface ServerOptions {
@@ -34,6 +51,8 @@ export interface ServerOptions {
 	hostname?: string;
 	/** Buffer bytes above which a message is dropped for a slow client (default 1 MB) */
 	backpressureLimit?: number;
+	/** Max number of events to keep in replay buffer (default 1000) */
+	replayBufferSize?: number;
 }
 
 export function createServer(options: ServerOptions = {}) {
@@ -42,13 +61,38 @@ export function createServer(options: ServerOptions = {}) {
 	const backpressureDropLimit =
 		options.backpressureLimit ?? DEFAULT_BACKPRESSURE_DROP_BYTES;
 	const backpressureCloseLimit = backpressureDropLimit * 4;
+	const replayBufferSize =
+		options.replayBufferSize ?? DEFAULT_REPLAY_BUFFER_SIZE;
 
 	const clients = new Set<ServerWebSocket<ClientData>>();
 
-	/**
-	 * All event types that have ever been seen. Used to subscribe glob-pattern
-	 * clients to newly discovered topics automatically.
-	 */
+	// -----------------------------------------------------------------------
+	// Sequence numbers and replay buffer
+	// -----------------------------------------------------------------------
+
+	let nextSeq = 0;
+
+	interface BufferedEvent {
+		seq: number;
+		event: EventEnvelope & { seq: number };
+	}
+
+	const replayBuffer: BufferedEvent[] = [];
+
+	function assignSeq(ev: EventEnvelope): EventEnvelope & { seq: number } {
+		const seq = nextSeq++;
+		const stamped = { ...ev, seq };
+		replayBuffer.push({ seq, event: stamped });
+		if (replayBuffer.length > replayBufferSize) {
+			replayBuffer.shift();
+		}
+		return stamped;
+	}
+
+	// -----------------------------------------------------------------------
+	// All event types that have ever been seen
+	// -----------------------------------------------------------------------
+
 	const knownEventTypes = new Set<string>();
 
 	const usageTracker = new UsageTracker((type, sessionId, data) => {
@@ -62,14 +106,12 @@ export function createServer(options: ServerOptions = {}) {
 	function safeSend(ws: ServerWebSocket<ClientData>, msg: string): void {
 		const buffered = ws.getBufferedAmount();
 		if (buffered >= backpressureCloseLimit) {
-			console.warn(`[backpressure] closing slow client (buffered=${buffered})`);
+			logger.warn("closing slow client due to backpressure", { buffered });
 			ws.close(1008, "backpressure limit exceeded");
 			return;
 		}
 		if (buffered >= backpressureDropLimit) {
-			console.warn(
-				`[backpressure] dropping message for slow client (buffered=${buffered})`,
-			);
+			logger.warn("dropping message for slow client", { buffered });
 			return;
 		}
 		ws.send(msg);
@@ -79,19 +121,13 @@ export function createServer(options: ServerOptions = {}) {
 	// Pub/sub helpers
 	// -----------------------------------------------------------------------
 
-	/**
-	 * Register a new event type. For any connected client whose glob patterns
-	 * match the new type, subscribe them to the Bun pub/sub topic.
-	 */
 	function registerEventType(eventType: string): void {
 		if (knownEventTypes.has(eventType)) return;
 		knownEventTypes.add(eventType);
 
-		// For each client, check if any of their glob patterns match this new type
 		for (const ws of clients) {
 			for (const pattern of ws.data.globPatterns) {
 				if (topicMatches(eventType, pattern)) {
-					// Subscribe to both unfiltered and session-filtered topics
 					ws.subscribe(eventType);
 					if (ws.data.sessionFilter) {
 						ws.subscribe(`${ws.data.sessionFilter}/${eventType}`);
@@ -108,26 +144,39 @@ export function createServer(options: ServerOptions = {}) {
 
 	const sessionWatcher = new SessionWatcher({
 		onEvent(event) {
-			usageTracker.handleEvent(event);
-			broadcast(
-				envelope(event.type, event.sessionId, event.data, event.agentId),
-			);
+			try {
+				usageTracker.handleEvent(event);
+				broadcast(
+					envelope(event.type, event.sessionId, event.data, event.agentId),
+				);
+			} catch (err) {
+				logger.error("error in session watcher event handler", {
+					error: String(err),
+					eventType: event.type,
+				});
+				broadcastSystemError("session_watcher", String(err), true);
+			}
 		},
 		onAgentStateChange(agents) {
-			const bySession = new Map<string, typeof agents>();
-			for (const a of agents) {
-				const list = bySession.get(a.sessionId) ?? [];
-				list.push(a);
-				bySession.set(a.sessionId, list);
-			}
-			for (const [sid, sessionAgents] of bySession) {
-				broadcast(
-					envelope("agent.state_changed", sid, { agents: sessionAgents }),
-				);
+			try {
+				const bySession = new Map<string, typeof agents>();
+				for (const a of agents) {
+					const list = bySession.get(a.sessionId) ?? [];
+					list.push(a);
+					bySession.set(a.sessionId, list);
+				}
+				for (const [sid, sessionAgents] of bySession) {
+					broadcast(
+						envelope("agent.state_changed", sid, { agents: sessionAgents }),
+					);
+				}
+			} catch (err) {
+				logger.error("error in agent state change handler", {
+					error: String(err),
+				});
 			}
 		},
 		onRawLine(sessionId, line) {
-			// Forward raw JSONL lines to clients subscribed via subscribe_agent_log
 			const msg = JSON.stringify({
 				type: "agent_log",
 				sessionId,
@@ -165,10 +214,24 @@ export function createServer(options: ServerOptions = {}) {
 	// Broadcast
 	// -----------------------------------------------------------------------
 
+	function broadcastSystemError(
+		source: string,
+		message: string,
+		recoverable: boolean,
+	): void {
+		const ev = envelope("system.error", "", { source, message, recoverable });
+		const stamped = assignSeq(ev);
+		const msg = JSON.stringify(stamped);
+		for (const ws of clients) {
+			safeSend(ws, msg);
+		}
+	}
+
 	function broadcast(event: EventEnvelope): void {
 		registerEventType(event.type);
 
-		const msg = JSON.stringify(event);
+		const stamped = assignSeq(event);
+		const msg = JSON.stringify(stamped);
 
 		for (const ws of clients) {
 			const data = ws.data;
@@ -194,6 +257,23 @@ export function createServer(options: ServerOptions = {}) {
 	}
 
 	// -----------------------------------------------------------------------
+	// Replay
+	// -----------------------------------------------------------------------
+
+	function sendReplay(ws: ServerWebSocket<ClientData>, lastSeq: number): void {
+		const toReplay = replayBuffer.filter((b) => b.seq > lastSeq);
+		for (const { event } of toReplay) {
+			// Only send events that match the client's subscriptions
+			const data = ws.data;
+			if (data.subscriptions.size === 0) continue;
+			if (!matchesAny(event.type, data.subscriptions)) continue;
+			if (data.sessionFilter && event.sessionId !== data.sessionFilter)
+				continue;
+			safeSend(ws, JSON.stringify(event));
+		}
+	}
+
+	// -----------------------------------------------------------------------
 	// get_session_history helper
 	// -----------------------------------------------------------------------
 
@@ -201,10 +281,8 @@ export function createServer(options: ServerOptions = {}) {
 		sessionId: string,
 		limit: number,
 	): Promise<ParsedEvent[]> {
-		// Try to get the path from the watcher (session is currently active)
 		let jsonlPath = sessionWatcher.getJsonlPath(sessionId);
 
-		// Fall back: look up from discovery (session may still be in discovery map)
 		if (!jsonlPath) {
 			const sessions = discovery.getSessions();
 			const found = sessions.find(
@@ -224,7 +302,6 @@ export function createServer(options: ServerOptions = {}) {
 		try {
 			const size = file.size;
 			if (size > MAX_HISTORY_FILE_BYTES) {
-				// File too large — return empty to avoid DoS via memory exhaustion
 				return [];
 			}
 			text = await file.text();
@@ -255,6 +332,34 @@ export function createServer(options: ServerOptions = {}) {
 		}
 
 		return limit > 0 ? events.slice(-limit) : events;
+	}
+
+	// -----------------------------------------------------------------------
+	// Heartbeat
+	// -----------------------------------------------------------------------
+
+	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+	function startHeartbeat(): void {
+		heartbeatTimer = setInterval(() => {
+			for (const ws of clients) {
+				if (ws.readyState !== 1 /* OPEN */) continue;
+				ws.data.lastPingAt = Date.now();
+				ws.ping();
+				// Schedule pong timeout
+				ws.data.pongTimer = setTimeout(() => {
+					logger.warn("client did not respond to ping, closing");
+					ws.close(1001, "ping timeout");
+				}, PONG_TIMEOUT_MS);
+			}
+		}, HEARTBEAT_INTERVAL_MS);
+	}
+
+	function stopHeartbeat(): void {
+		if (heartbeatTimer !== null) {
+			clearInterval(heartbeatTimer);
+			heartbeatTimer = null;
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -351,11 +456,17 @@ export function createServer(options: ServerOptions = {}) {
 				}
 
 				for (const event of result.events) {
-					// Feed agent-tracker-compatible events through sessionWatcher
-					sessionWatcher.handleExternalEvent(event);
-					broadcast(
-						envelope(event.type, event.sessionId, event.data, event.agentId),
-					);
+					try {
+						sessionWatcher.handleExternalEvent(event);
+						broadcast(
+							envelope(event.type, event.sessionId, event.data, event.agentId),
+						);
+					} catch (err) {
+						logger.error("error processing hook event", {
+							error: String(err),
+							eventType: event.type,
+						});
+					}
 				}
 
 				return new Response(
@@ -371,6 +482,8 @@ export function createServer(options: ServerOptions = {}) {
 					sessionFilter: null,
 					globPatterns: new Set(),
 					rawLogSessions: new Set(),
+					lastPingAt: null,
+					pongTimer: null,
 				},
 			});
 			if (!upgraded) {
@@ -383,10 +496,24 @@ export function createServer(options: ServerOptions = {}) {
 			open(ws) {
 				clients.add(ws);
 				sendSnapshot(ws);
+				logger.debug("client connected", { total: clients.size });
 			},
 
 			close(ws) {
+				if (ws.data.pongTimer !== null) {
+					clearTimeout(ws.data.pongTimer);
+				}
 				clients.delete(ws);
+				logger.debug("client disconnected", { total: clients.size });
+			},
+
+			pong(ws) {
+				// Clear the pong timeout when pong is received
+				if (ws.data.pongTimer !== null) {
+					clearTimeout(ws.data.pongTimer);
+					ws.data.pongTimer = null;
+				}
+				ws.data.lastPingAt = null;
 			},
 
 			message(ws, message) {
@@ -417,10 +544,8 @@ export function createServer(options: ServerOptions = {}) {
 					case "subscribe": {
 						for (const topic of msg.topics) {
 							ws.data.subscriptions.add(topic);
-							// Track glob patterns separately for late-binding to new event types
 							if (topic.includes("*")) {
 								ws.data.globPatterns.add(topic);
-								// Subscribe to all already-known event types matching this glob
 								for (const knownType of knownEventTypes) {
 									if (topicMatches(knownType, topic)) {
 										ws.subscribe(knownType);
@@ -430,14 +555,12 @@ export function createServer(options: ServerOptions = {}) {
 									}
 								}
 							} else {
-								// Exact topic — subscribe directly to Bun pub/sub
 								ws.subscribe(topic);
 								if (msg.sessionId) {
 									ws.subscribe(`${msg.sessionId}/${topic}`);
 								}
 							}
 						}
-						// Set or clear session filter
 						ws.data.sessionFilter = msg.sessionId ?? null;
 						safeSend(
 							ws,
@@ -454,7 +577,6 @@ export function createServer(options: ServerOptions = {}) {
 							ws.data.subscriptions.delete(topic);
 							ws.data.globPatterns.delete(topic);
 							ws.unsubscribe(topic);
-							// Unsubscribe from any session-prefixed variants
 							if (ws.data.sessionFilter) {
 								ws.unsubscribe(`${ws.data.sessionFilter}/${topic}`);
 							}
@@ -574,6 +696,11 @@ export function createServer(options: ServerOptions = {}) {
 						}
 						break;
 					}
+
+					case "replay": {
+						sendReplay(ws, msg.lastSeq);
+						break;
+					}
 				}
 			},
 		},
@@ -586,13 +713,32 @@ export function createServer(options: ServerOptions = {}) {
 
 		async start() {
 			await discovery.start();
-			console.log(`claw-socket listening on ws://${hostname}:${port}`);
+			startHeartbeat();
+			logger.info("claw-socket listening", {
+				url: `ws://${hostname}:${server.port}`,
+			});
 		},
 
-		stop() {
+		async stop(): Promise<void> {
+			stopHeartbeat();
+
+			// Close all connected clients with "going away"
+			for (const ws of clients) {
+				try {
+					ws.close(1001, "server going away");
+				} catch {
+					// already closed
+				}
+			}
+
+			// Grace period for in-flight operations
+			await new Promise<void>((resolve) =>
+				setTimeout(resolve, SHUTDOWN_GRACE_MS),
+			);
+
 			sessionWatcher.stop();
 			discovery.stop();
-			server.stop();
+			server.stop(true);
 		},
 	};
 }

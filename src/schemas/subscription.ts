@@ -61,6 +61,15 @@ export const GetUsageMessageSchema = z.object({
 
 export type GetUsageMessage = z.infer<typeof GetUsageMessageSchema>;
 
+/** Client → server: request replay of events after a sequence number */
+export const ReplayMessageSchema = z.object({
+	type: z.literal("replay"),
+	/** Replay all buffered events with seq > lastSeq */
+	lastSeq: z.number().int().nonnegative(),
+});
+
+export type ReplayMessage = z.infer<typeof ReplayMessageSchema>;
+
 /** Union of all client → server messages */
 export const ClientMessageSchema = z.discriminatedUnion("type", [
 	SubscribeMessageSchema,
@@ -70,6 +79,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
 	GetSessionHistoryMessageSchema,
 	SubscribeAgentLogMessageSchema,
 	GetUsageMessageSchema,
+	ReplayMessageSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
