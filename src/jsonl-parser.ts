@@ -72,6 +72,12 @@ export class JsonlParser {
 			case "system":
 				this.processSystem(line);
 				break;
+			case "content_block_delta":
+				this.processContentBlockDelta(line);
+				break;
+			case "prompt_suggestion":
+				this.processPromptSuggestion(line);
+				break;
 		}
 	}
 
@@ -290,6 +296,37 @@ export class JsonlParser {
 			message,
 			...(retryAfter !== undefined ? { retryAfter } : {}),
 		});
+	}
+
+	processContentBlockDelta(line: Record<string, unknown>): void {
+		const index = typeof line["index"] === "number" ? line["index"] : 0;
+		const delta = line["delta"];
+		if (typeof delta !== "object" || delta === null) return;
+		const d = delta as Record<string, unknown>;
+		const deltaType = d["type"];
+
+		if (deltaType === "text_delta" && typeof d["text"] === "string") {
+			this.emit("stream.delta", { index, text: d["text"] });
+		} else if (
+			deltaType === "thinking_delta" &&
+			typeof d["thinking"] === "string"
+		) {
+			this.emit("stream.thinking_delta", { index, thinking: d["thinking"] });
+		} else if (
+			deltaType === "input_json_delta" &&
+			typeof d["partial_json"] === "string"
+		) {
+			this.emit("stream.tool_use_delta", {
+				index,
+				partialJson: d["partial_json"],
+			});
+		}
+	}
+
+	private processPromptSuggestion(line: Record<string, unknown>): void {
+		const suggestions = line["suggestions"];
+		if (!Array.isArray(suggestions)) return;
+		this.emit("prompt.suggestion", { suggestions });
 	}
 
 	private emitContextWindowEvent(line: Record<string, unknown>): void {
