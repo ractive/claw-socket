@@ -116,6 +116,15 @@ export async function runCli(argv: string[]): Promise<void> {
 		return;
 	}
 
+	// Warn when binding to a non-loopback address — the server becomes network-accessible
+	const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+	if (!loopbackHosts.has(opts.host)) {
+		log.warn(
+			"WARNING: claw-socket is binding to a non-loopback address and will be reachable from the network",
+			{ host: opts.host },
+		);
+	}
+
 	const app = createServer({ port: opts.port, hostname: opts.host });
 	await app.start();
 

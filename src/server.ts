@@ -33,6 +33,8 @@ export interface ServerOptions {
 	backpressureLimit?: number;
 	/** Max number of events to keep in replay buffer (default 1000) */
 	replayBufferSize?: number;
+	/** Maximum number of simultaneous WebSocket connections (default 100) */
+	maxConnections?: number;
 }
 
 export function createServer(options: ServerOptions = {}) {
@@ -43,6 +45,7 @@ export function createServer(options: ServerOptions = {}) {
 	const backpressureCloseLimit = backpressureDropLimit * 4;
 	const replayBufferSize =
 		options.replayBufferSize ?? DEFAULT_REPLAY_BUFFER_SIZE;
+	const maxConnections = options.maxConnections ?? 100;
 
 	const clients = new Set<ServerWebSocket<ClientData>>();
 
@@ -90,7 +93,16 @@ export function createServer(options: ServerOptions = {}) {
 		message: string,
 		recoverable: boolean,
 	): void {
-		const ev = envelope("system.error", "", { source, message, recoverable });
+		// Log full detail server-side only; broadcast a generic message to clients.
+		logger.error("system error", { source, detail: message, recoverable });
+		const genericMessage = recoverable
+			? "An internal error occurred; the server is continuing."
+			: "A fatal internal error occurred.";
+		const ev = envelope("system.error", "", {
+			source,
+			message: genericMessage,
+			recoverable,
+		});
 		const { json } = assignSeq(ev);
 		for (const ws of clients) {
 			safeSend(ws, json);
@@ -128,10 +140,6 @@ export function createServer(options: ServerOptions = {}) {
 					envelope(event.type, event.sessionId, event.data, event.agentId),
 				);
 			} catch (err) {
-				logger.error("error in session watcher event handler", {
-					error: String(err),
-					eventType: event.type,
-				});
 				broadcastSystemError("session_watcher", String(err), true);
 			}
 		},
@@ -224,10 +232,14 @@ export function createServer(options: ServerOptions = {}) {
 				discovery,
 				sessionWatcher,
 				broadcast,
+				clientCount: () => clients.size,
+				maxConnections,
 			});
 		},
 
 		websocket: {
+			maxPayloadLength: 65536, // 64 KB — client messages are small commands
+
 			open(ws) {
 				clients.add(ws);
 				sendSnapshot(ws);

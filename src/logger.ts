@@ -21,6 +21,25 @@ export interface Logger {
 	child(fields: Record<string, unknown>): Logger;
 }
 
+/** Strip newlines and carriage returns to prevent log injection in plain-text output. */
+function sanitize(s: string): string {
+	return s.replace(/[\r\n]/g, " ");
+}
+
+/**
+ * Sanitize all string values within a fields object for plain-text log output.
+ * Non-string values are left as-is since they will be JSON-serialized.
+ */
+function sanitizeFields(
+	fields: Record<string, unknown>,
+): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(fields)) {
+		out[k] = typeof v === "string" ? sanitize(v) : v;
+	}
+	return out;
+}
+
 function writeLog(
 	level: LogLevel,
 	msg: string,
@@ -29,6 +48,7 @@ function writeLog(
 ): void {
 	const ts = new Date().toISOString();
 	if (structured) {
+		// JSON output: JSON.stringify handles special characters safely.
 		const line = JSON.stringify({ level, ts, msg, ...fields });
 		if (level === "error" || level === "warn") {
 			console.error(line);
@@ -36,9 +56,15 @@ function writeLog(
 			console.log(line);
 		}
 	} else {
+		// Human-readable output: strip newlines from message and field values to
+		// prevent log injection (a crafted value could fake additional log lines).
+		const safeMsg = sanitize(msg);
+		const safeFields = sanitizeFields(fields);
 		const extra =
-			Object.keys(fields).length > 0 ? ` ${JSON.stringify(fields)}` : "";
-		const line = `[${ts}] ${level.toUpperCase()} ${msg}${extra}`;
+			Object.keys(safeFields).length > 0
+				? ` ${JSON.stringify(safeFields)}`
+				: "";
+		const line = `[${ts}] ${level.toUpperCase()} ${safeMsg}${extra}`;
 		if (level === "error" || level === "warn") {
 			console.error(line);
 		} else {

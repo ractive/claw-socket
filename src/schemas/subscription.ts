@@ -52,6 +52,16 @@ export type SubscribeAgentLogMessage = z.infer<
 	typeof SubscribeAgentLogMessageSchema
 >;
 
+/** Client → server: unsubscribe from raw JSONL lines. Omit sessionId to clear all. */
+export const UnsubscribeAgentLogMessageSchema = z.object({
+	type: z.literal("unsubscribe_agent_log"),
+	sessionId: z.string().optional(),
+});
+
+export type UnsubscribeAgentLogMessage = z.infer<
+	typeof UnsubscribeAgentLogMessageSchema
+>;
+
 /** Client → server: request usage totals (session or global) */
 export const GetUsageMessageSchema = z.object({
 	type: z.literal("get_usage"),
@@ -78,6 +88,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
 	GetSessionListMessageSchema,
 	GetSessionHistoryMessageSchema,
 	SubscribeAgentLogMessageSchema,
+	UnsubscribeAgentLogMessageSchema,
 	GetUsageMessageSchema,
 	ReplayMessageSchema,
 ]);
