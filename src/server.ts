@@ -6,6 +6,7 @@ import {
 	type Snapshot,
 } from "./schemas/index.ts";
 import { SessionDiscovery, type SessionEvent } from "./session-discovery.ts";
+import { SessionWatcher } from "./session-watcher.ts";
 import { matchesAny } from "./topic-matcher.ts";
 
 interface ClientData {
@@ -24,8 +25,24 @@ export function createServer(options: ServerOptions = {}) {
 
 	const clients = new Set<ServerWebSocket<ClientData>>();
 
+	const sessionWatcher = new SessionWatcher({
+		onEvent(event) {
+			broadcast(
+				envelope(event.type, event.sessionId, event.data, event.agentId),
+			);
+		},
+		onAgentStateChange(agents) {
+			broadcast(
+				envelope("agent.state_changed", "", {
+					agents,
+				}),
+			);
+		},
+	});
+
 	const discovery = new SessionDiscovery((event: SessionEvent) => {
 		if (event.type === "session.discovered") {
+			sessionWatcher.watchSession(event.session.sessionId, event.session.cwd);
 			const ev = envelope("session.discovered", event.session.sessionId, {
 				pid: event.session.pid,
 				sessionId: event.session.sessionId,
@@ -34,6 +51,7 @@ export function createServer(options: ServerOptions = {}) {
 			});
 			broadcast(ev);
 		} else {
+			sessionWatcher.unwatchSession(event.sessionId);
 			const ev = envelope("session.removed", event.sessionId, {
 				sessionId: event.sessionId,
 				reason: event.reason,
@@ -60,6 +78,7 @@ export function createServer(options: ServerOptions = {}) {
 		const snapshot: Snapshot = {
 			type: "snapshot",
 			sessions: discovery.getSessions(),
+			agents: sessionWatcher.getAgents(),
 		};
 		ws.send(JSON.stringify(snapshot));
 	}
@@ -172,6 +191,7 @@ export function createServer(options: ServerOptions = {}) {
 		},
 
 		stop() {
+			sessionWatcher.stop();
 			discovery.stop();
 			server.stop();
 		},
