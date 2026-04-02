@@ -21,6 +21,10 @@ export function topicMatches(eventType: string, pattern: string): boolean {
 
 /** Check if an event type matches any pattern in a set */
 export function matchesAny(eventType: string, patterns: Set<string>): boolean {
+	// Fast-path: wildcard or exact match avoids full iteration
+	if (patterns.has("*")) return true;
+	if (patterns.has(eventType)) return true;
+
 	for (const pattern of patterns) {
 		if (topicMatches(eventType, pattern)) return true;
 	}

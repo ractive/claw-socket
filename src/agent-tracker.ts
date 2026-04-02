@@ -13,6 +13,7 @@ export interface AgentTrackerOptions {
 }
 
 const MAX_TOOL_HISTORY = 10;
+const MAX_IN_FLIGHT_TOOLS = 100;
 const DEFAULT_STALENESS_THRESHOLD_MS = 30_000;
 const DEFAULT_STALENESS_CHECK_INTERVAL_MS = 5_000;
 
@@ -39,6 +40,17 @@ function extractToolFields(data: Record<string, unknown>): ToolFields {
 	return { toolName, inputSummary, toolUseId };
 }
 
+/**
+ * Event types that do NOT affect agent state — skip the onAgentStateChange
+ * callback when these are the only events processed.
+ */
+const SKIP_STATE_CHANGE_TYPES = new Set([
+	"content_block_delta",
+	"prompt_suggestion",
+	"usage.rate_limit",
+	"usage.context",
+]);
+
 export class AgentTracker {
 	private readonly agents = new Map<string, AgentState>();
 	private readonly inFlightTools = new Map<
@@ -48,8 +60,10 @@ export class AgentTracker {
 	private readonly stalenessThresholdMs: number;
 	private readonly stalenessCheckIntervalMs: number;
 	private stalenessTimer: ReturnType<typeof setInterval> | null = null;
+	private dirty = false;
 
 	onStalenessChange?: (agentId: string, isStale: boolean) => void;
+	onAgentStateChange?: (sessionId: string, agents: AgentState[]) => void;
 
 	constructor(options: AgentTrackerOptions = {}) {
 		this.stalenessThresholdMs =
@@ -103,7 +117,14 @@ export class AgentTracker {
 		this.agents.clear();
 	}
 
+	/**
+	 * Handle an event, update agent state, and fire onAgentStateChange if state
+	 * actually changed. Events in SKIP_STATE_CHANGE_TYPES are skipped entirely
+	 * since they never affect agent state.
+	 */
 	handleEvent(event: ParsedEvent): void {
+		if (SKIP_STATE_CHANGE_TYPES.has(event.type)) return;
+
 		const agentId = event.agentId ?? event.sessionId;
 		const agent = this.agents.get(agentId);
 
@@ -141,7 +162,7 @@ export class AgentTracker {
 					agent.currentToolInput = toolInput;
 				}
 				if (typeof toolUseId === "string") {
-					this.inFlightTools.set(toolUseId, {
+					this.addInFlightTool(toolUseId, {
 						toolName: typeof toolName === "string" ? toolName : "unknown",
 						inputSummary: typeof toolInput === "string" ? toolInput : "",
 						startedAt: Date.now(),
@@ -193,7 +214,7 @@ export class AgentTracker {
 				agent.currentTool = toolName;
 				agent.currentToolInput = inputSummary;
 				if (toolUseId) {
-					this.inFlightTools.set(toolUseId, {
+					this.addInFlightTool(toolUseId, {
 						toolName,
 						inputSummary,
 						startedAt: Date.now(),
@@ -285,6 +306,22 @@ export class AgentTracker {
 				break;
 			}
 		}
+
+		this.dirty = true;
+	}
+
+	/**
+	 * If state has changed since the last call, fire onAgentStateChange for the
+	 * given sessionId and reset the dirty flag. Call this after handleEvent().
+	 */
+	notifyIfDirty(sessionId: string): void {
+		if (!this.dirty) return;
+		this.dirty = false;
+		if (!this.onAgentStateChange) return;
+		const agents = Array.from(this.agents.values()).filter(
+			(a) => a.sessionId === sessionId,
+		);
+		this.onAgentStateChange(sessionId, agents);
 	}
 
 	startStalenessCheck(): void {
@@ -327,5 +364,19 @@ export class AgentTracker {
 			agent.toolHistory.shift();
 		}
 		agent.toolHistory.push(entry);
+	}
+
+	private addInFlightTool(
+		toolUseId: string,
+		value: { toolName: string; inputSummary: string; startedAt: number },
+	): void {
+		if (this.inFlightTools.size >= MAX_IN_FLIGHT_TOOLS) {
+			// Delete the oldest entry (first key in insertion order)
+			const oldestKey = this.inFlightTools.keys().next().value;
+			if (oldestKey !== undefined) {
+				this.inFlightTools.delete(oldestKey);
+			}
+		}
+		this.inFlightTools.set(toolUseId, value);
 	}
 }

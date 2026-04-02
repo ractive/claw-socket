@@ -25,6 +25,8 @@ export interface ClientData {
 export interface BufferedEvent {
 	seq: number;
 	event: EventEnvelope & { seq: number };
+	/** Pre-serialized JSON string, cached to avoid re-serialization during replay */
+	json: string;
 }
 
 export function makeSafeSend(
@@ -47,38 +49,79 @@ export function makeSafeSend(
 }
 
 export function makeReplayBuffer(maxSize: number) {
-	const buffer: BufferedEvent[] = [];
+	// Ring buffer: fixed-size array with head/tail indices for O(1) push/eviction
+	const effectiveSize = Math.max(1, maxSize);
+	const ring = new Array<BufferedEvent | undefined>(effectiveSize);
+	let head = 0; // index of the oldest entry (next slot to overwrite)
+	let count = 0; // number of valid entries currently stored
 	let nextSeq = 0;
 
-	function assignSeq(ev: EventEnvelope): EventEnvelope & { seq: number } {
+	function assignSeq(ev: EventEnvelope): {
+		stamped: EventEnvelope & { seq: number };
+		json: string;
+	} {
 		const seq = nextSeq++;
 		const stamped = { ...ev, seq };
-		buffer.push({ seq, event: stamped });
-		if (buffer.length > maxSize) {
-			buffer.shift();
+		const json = JSON.stringify(stamped);
+		const tail = (head + count) % effectiveSize;
+		ring[tail] = { seq, event: stamped, json };
+		if (count < effectiveSize) {
+			count++;
+		} else {
+			// Buffer full: advance head to evict oldest entry
+			head = (head + 1) % effectiveSize;
 		}
-		return stamped;
+		return { stamped, json };
 	}
 
-	function getBuffer(): readonly BufferedEvent[] {
-		return buffer;
+	/**
+	 * Iterate buffered events with seq > lastSeq.
+	 * Seqs are monotonic so we binary-search for the start index.
+	 */
+	function forEachSince(
+		lastSeq: number,
+		cb: (entry: BufferedEvent) => void,
+	): void {
+		if (count === 0) return;
+
+		// Binary search for the first entry with seq > lastSeq
+		let lo = 0;
+		let hi = count - 1;
+		let startOffset = count; // default: nothing to replay
+
+		while (lo <= hi) {
+			const mid = (lo + hi) >>> 1;
+			const entry = ring[(head + mid) % effectiveSize] as BufferedEvent;
+			if (entry.seq <= lastSeq) {
+				lo = mid + 1;
+			} else {
+				startOffset = mid;
+				hi = mid - 1;
+			}
+		}
+
+		for (let i = startOffset; i < count; i++) {
+			cb(ring[(head + i) % effectiveSize] as BufferedEvent);
+		}
 	}
 
-	return { assignSeq, getBuffer };
+	return { assignSeq, forEachSince };
 }
+
+export type ReplayBuffer = ReturnType<typeof makeReplayBuffer>;
 
 export function sendReplay(
 	ws: ServerWebSocket<ClientData>,
 	lastSeq: number,
-	buffer: readonly BufferedEvent[],
+	replayBuffer: ReplayBuffer,
 	safeSend: (ws: ServerWebSocket<ClientData>, msg: string) => void,
 ): void {
-	const toReplay = buffer.filter((b) => b.seq > lastSeq);
-	for (const { event } of toReplay) {
-		const data = ws.data;
-		if (data.subscriptions.size === 0) continue;
-		if (!matchesAny(event.type, data.subscriptions)) continue;
-		if (data.sessionFilter && event.sessionId !== data.sessionFilter) continue;
-		safeSend(ws, JSON.stringify(event));
-	}
+	const data = ws.data;
+	replayBuffer.forEachSince(lastSeq, (entry) => {
+		const { event, json } = entry;
+		if (data.subscriptions.size === 0) return;
+		if (!matchesAny(event.type, data.subscriptions)) return;
+		if (data.sessionFilter && event.sessionId !== data.sessionFilter) return;
+		safeSend(ws, json);
+	});
 }

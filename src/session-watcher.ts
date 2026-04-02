@@ -10,7 +10,7 @@ import { JsonlWatcher, type JsonlWatcherOptions } from "./jsonl-watcher.ts";
 
 export interface SessionWatcherOptions {
 	onEvent: (event: ParsedEvent) => void;
-	onAgentStateChange: (agents: AgentState[]) => void;
+	onAgentStateChange: (sessionId: string, agents: AgentState[]) => void;
 	onRawLine?: (sessionId: string, line: Record<string, unknown>) => void;
 	watcherOptions?: JsonlWatcherOptions;
 	trackerOptions?: AgentTrackerOptions;
@@ -37,7 +37,10 @@ export class SessionWatcher {
 	private readonly sessions = new Map<string, WatchedSession>();
 	private readonly tracker: AgentTracker;
 	private readonly onEvent: (event: ParsedEvent) => void;
-	private readonly onAgentStateChange: (agents: AgentState[]) => void;
+	private readonly onAgentStateChange: (
+		sessionId: string,
+		agents: AgentState[],
+	) => void;
 	private readonly onRawLine:
 		| ((sessionId: string, line: Record<string, unknown>) => void)
 		| undefined;
@@ -50,8 +53,15 @@ export class SessionWatcher {
 		this.watcherOptions = options.watcherOptions;
 
 		this.tracker = new AgentTracker(options.trackerOptions);
-		this.tracker.onStalenessChange = () => {
-			this.onAgentStateChange(this.tracker.getAgents());
+		this.tracker.onAgentStateChange = this.onAgentStateChange;
+		this.tracker.onStalenessChange = (agentId) => {
+			const agent = this.tracker.getAgent(agentId);
+			if (!agent) return;
+			const sessionId = agent.sessionId;
+			const agents = this.tracker
+				.getAgents()
+				.filter((a) => a.sessionId === sessionId);
+			this.onAgentStateChange(sessionId, agents);
 		};
 		this.tracker.startStalenessCheck();
 	}
@@ -64,7 +74,7 @@ export class SessionWatcher {
 		const parser = new JsonlParser(sessionId, (event: ParsedEvent) => {
 			this.tracker.handleEvent(event);
 			this.onEvent(event);
-			this.onAgentStateChange(this.tracker.getAgents());
+			this.tracker.notifyIfDirty(sessionId);
 		});
 
 		const watcher = new JsonlWatcher(
@@ -114,7 +124,7 @@ export class SessionWatcher {
 	handleExternalEvent(event: ParsedEvent): void {
 		if (!SessionWatcher.TRACKER_EVENTS.has(event.type)) return;
 		this.tracker.handleEvent(event);
-		this.onAgentStateChange(this.tracker.getAgents());
+		this.tracker.notifyIfDirty(event.sessionId);
 	}
 
 	getAgents(): AgentState[] {
