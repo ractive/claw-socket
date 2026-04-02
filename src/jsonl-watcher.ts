@@ -1,7 +1,4 @@
-export type JsonlLineHandler = (
-	line: Record<string, unknown>,
-	byteOffset: number,
-) => void;
+export type JsonlLineHandler = (line: Record<string, unknown>) => void;
 
 export interface JsonlWatcherOptions {
 	pollIntervalMs?: number;
@@ -55,7 +52,11 @@ export class JsonlWatcher {
 			const file = Bun.file(this.filePath);
 			const size = file.size;
 
-			if (size <= this.currentByteOffset) {
+			if (size < this.currentByteOffset) {
+				this.currentByteOffset = 0;
+				this.lineBuffer = "";
+			}
+			if (size === this.currentByteOffset) {
 				return;
 			}
 
@@ -81,10 +82,7 @@ export class JsonlWatcher {
 						parsed !== null &&
 						!Array.isArray(parsed)
 					) {
-						this.handler(
-							parsed as Record<string, unknown>,
-							this.currentByteOffset,
-						);
+						this.handler(parsed as Record<string, unknown>);
 					}
 				} catch {
 					// Skip malformed JSON lines

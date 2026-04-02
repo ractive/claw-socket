@@ -37,6 +37,10 @@ const DEFAULT_STALENESS_CHECK_INTERVAL_MS = 5_000;
 
 export class AgentTracker {
 	private readonly agents = new Map<string, AgentState>();
+	private readonly inFlightTools = new Map<
+		string,
+		{ toolName: string; inputSummary: string; startedAt: number }
+	>();
 	private readonly stalenessThresholdMs: number;
 	private readonly stalenessCheckIntervalMs: number;
 	private stalenessTimer: ReturnType<typeof setInterval> | null = null;
@@ -125,11 +129,19 @@ export class AgentTracker {
 				agent.status = "tool_running";
 				const toolName = event.data["toolName"];
 				const toolInput = event.data["inputSummary"];
+				const toolUseId = event.data["toolUseId"];
 				if (typeof toolName === "string") {
 					agent.currentTool = toolName;
 				}
 				if (typeof toolInput === "string") {
 					agent.currentToolInput = toolInput;
+				}
+				if (typeof toolUseId === "string") {
+					this.inFlightTools.set(toolUseId, {
+						toolName: typeof toolName === "string" ? toolName : "unknown",
+						inputSummary: typeof toolInput === "string" ? toolInput : "",
+						startedAt: Date.now(),
+					});
 				}
 				break;
 			}
@@ -140,16 +152,26 @@ export class AgentTracker {
 				this.markActive(agent);
 				agent.status = "working";
 				const success = event.type === "tool.completed";
-				const toolName = event.data["toolName"];
-				const inputSummary = event.data["inputSummary"];
+				const toolUseIdVal = event.data["toolUseId"];
+				const tracked =
+					typeof toolUseIdVal === "string"
+						? this.inFlightTools.get(toolUseIdVal)
+						: undefined;
+				if (typeof toolUseIdVal === "string") {
+					this.inFlightTools.delete(toolUseIdVal);
+				}
+				const toolName = tracked?.toolName ?? event.data["toolName"];
+				const inputSummary =
+					tracked?.inputSummary ?? event.data["inputSummary"];
 				const durationMs = event.data["durationMs"];
-				const startedAt = event.data["startedAt"];
+				const startedAtVal = tracked?.startedAt;
 				this.addToolHistory(agent, {
 					toolName: typeof toolName === "string" ? toolName : "unknown",
 					inputSummary: typeof inputSummary === "string" ? inputSummary : "",
 					durationMs: typeof durationMs === "number" ? durationMs : 0,
 					success,
-					startedAt: typeof startedAt === "number" ? startedAt : Date.now(),
+					startedAt:
+						typeof startedAtVal === "number" ? startedAtVal : Date.now(),
 				});
 				agent.toolCount += 1;
 				delete agent.currentTool;
@@ -183,7 +205,8 @@ export class AgentTracker {
 
 			case "message.result": {
 				if (!agent) break;
-				agent.lastActivityAt = Date.now();
+				this.markActive(agent);
+				agent.status = "working";
 				const usage = event.data["usage"];
 				if (
 					typeof usage === "object" &&
@@ -193,11 +216,15 @@ export class AgentTracker {
 					const u = usage as Record<string, unknown>;
 					const outputTokens = u["output_tokens"];
 					const inputTokens = u["input_tokens"];
-					if (typeof outputTokens === "number") {
+					if (
+						typeof inputTokens === "number" &&
+						typeof outputTokens === "number"
+					) {
+						agent.tokenCount = inputTokens + outputTokens;
+					} else if (typeof outputTokens === "number") {
 						agent.tokenCount = outputTokens;
-					}
-					if (typeof inputTokens === "number") {
-						agent.tokenCount += inputTokens;
+					} else if (typeof inputTokens === "number") {
+						agent.tokenCount = inputTokens;
 					}
 				}
 				break;

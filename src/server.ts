@@ -32,11 +32,17 @@ export function createServer(options: ServerOptions = {}) {
 			);
 		},
 		onAgentStateChange(agents) {
-			broadcast(
-				envelope("agent.state_changed", "", {
-					agents,
-				}),
-			);
+			const bySession = new Map<string, typeof agents>();
+			for (const a of agents) {
+				const list = bySession.get(a.sessionId) ?? [];
+				list.push(a);
+				bySession.set(a.sessionId, list);
+			}
+			for (const [sid, sessionAgents] of bySession) {
+				broadcast(
+					envelope("agent.state_changed", sid, { agents: sessionAgents }),
+				);
+			}
 		},
 	});
 

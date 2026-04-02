@@ -21,7 +21,7 @@ interface WatchedSession {
 }
 
 function deriveJsonlPath(sessionId: string, cwd: string): string {
-	const projectKey = cwd.replace(/\//g, "-").replace(/^-/, "");
+	const projectKey = cwd.replace(/[\\/]/g, "-").replace(/^-/, "");
 	return join(
 		homedir(),
 		".claude",
@@ -58,6 +58,7 @@ export class SessionWatcher {
 		const parser = new JsonlParser(sessionId, (event: ParsedEvent) => {
 			this.tracker.handleEvent(event);
 			this.onEvent(event);
+			this.onAgentStateChange(this.tracker.getAgents());
 		});
 
 		const watcher = new JsonlWatcher(

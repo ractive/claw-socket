@@ -50,6 +50,7 @@ export type AgentState = z.infer<typeof AgentStateSchema>;
 export const AgentStartedEventSchema = z.object({
 	agentId: z.string(),
 	agentType: z.string(),
+	cwd: z.string().optional(),
 	parentToolUseId: z.string().optional(),
 });
 

@@ -171,6 +171,10 @@ export class JsonlParser {
 					const id = typeof b["id"] === "string" ? b["id"] : undefined;
 					const name = typeof b["name"] === "string" ? b["name"] : "unknown";
 					if (id) {
+						if (this.inFlight.size >= 100) {
+							const oldestKey = this.inFlight.keys().next().value;
+							if (oldestKey) this.inFlight.delete(oldestKey);
+						}
 						this.inFlight.set(id, {
 							toolName: name,
 							startedAt: Date.now(),

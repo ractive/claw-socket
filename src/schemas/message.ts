@@ -38,7 +38,7 @@ export type ContentBlock = z.infer<typeof ContentBlockSchema>;
 /** User message event data */
 export const MessageUserEventSchema = z.object({
 	text: z.string(),
-	uuid: z.string(),
+	uuid: z.string().optional(),
 	isSynthetic: z.boolean().optional(),
 });
 
@@ -47,7 +47,7 @@ export type MessageUserEvent = z.infer<typeof MessageUserEventSchema>;
 /** Assistant message event data */
 export const MessageAssistantEventSchema = z.object({
 	contentBlocks: z.array(ContentBlockSchema),
-	uuid: z.string(),
+	uuid: z.string().optional(),
 	model: z.string().optional(),
 });
 
@@ -55,10 +55,10 @@ export type MessageAssistantEvent = z.infer<typeof MessageAssistantEventSchema>;
 
 /** Token usage breakdown */
 export const UsageSchema = z.object({
-	inputTokens: z.number(),
-	outputTokens: z.number(),
-	cacheReadTokens: z.number().optional(),
-	cacheCreationTokens: z.number().optional(),
+	input_tokens: z.number(),
+	output_tokens: z.number(),
+	cache_read_tokens: z.number().optional(),
+	cache_creation_tokens: z.number().optional(),
 });
 
 export type Usage = z.infer<typeof UsageSchema>;
@@ -75,7 +75,7 @@ export type MessageResultSubtype = z.infer<typeof MessageResultSubtypeSchema>;
 
 /** Message result event data */
 export const MessageResultEventSchema = z.object({
-	subtype: MessageResultSubtypeSchema,
+	subtype: MessageResultSubtypeSchema.optional(),
 	durationMs: z.number().optional(),
 	durationApiMs: z.number().optional(),
 	numTurns: z.number().optional(),
@@ -142,7 +142,7 @@ export type SessionState = z.infer<typeof SessionStateSchema>;
 
 /** Emitted when session state changes */
 export const SessionStateChangedEventSchema = z.object({
-	state: SessionStateSchema,
+	state: z.union([SessionStateSchema, z.string()]),
 });
 
 export type SessionStateChangedEvent = z.infer<
