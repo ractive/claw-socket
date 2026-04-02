@@ -20,6 +20,10 @@ export interface ClientData {
 	lastPingAt: number | null;
 	/** Timer handle for pong timeout */
 	pongTimer: ReturnType<typeof setTimeout> | null;
+	/** Timestamp (ms) of the last accepted replay command, for rate limiting (max 1/s) */
+	lastReplayAt: number | null;
+	/** Number of in-flight get_session_history requests, for concurrency limiting (max 2) */
+	activeHistoryRequests: number;
 }
 
 export interface BufferedEvent {

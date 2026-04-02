@@ -16,17 +16,25 @@ function getAsyncApiSpecJson(): string {
 	return asyncApiSpecCache;
 }
 
+const ASYNCAPI_VERSION = "2.6.0";
+// SRI hashes generated from https://unpkg.com/@asyncapi/react-component@2.6.0/...
+// Regenerate with: openssl dgst -sha384 -binary <file> | openssl base64 -A
+const ASYNCAPI_CSS_INTEGRITY =
+	"sha384-LM7ebfJXIA4tw6896yik2GIpLWbNRZYGx44nQNEX1AbDyv8uxgg6bcURopAszNuI";
+const ASYNCAPI_JS_INTEGRITY =
+	"sha384-M8zz0hhlwFOEmmBjisfOzjthn32MZcnOwwkhcx0gLujNCo3uqYTjoizWvPC4NHZQ";
+
 const DOCS_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>claw-socket API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/@asyncapi/react-component@latest/styles/default.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/@asyncapi/react-component@${ASYNCAPI_VERSION}/styles/default.min.css" integrity="${ASYNCAPI_CSS_INTEGRITY}" crossorigin="anonymous">
 </head>
 <body>
   <div id="asyncapi"></div>
-  <script src="https://unpkg.com/@asyncapi/react-component@latest/browser/standalone/index.js"></script>
+  <script src="https://unpkg.com/@asyncapi/react-component@${ASYNCAPI_VERSION}/browser/standalone/index.js" integrity="${ASYNCAPI_JS_INTEGRITY}" crossorigin="anonymous"></script>
   <script>
     AsyncApiComponent.render({
       schema: { url: '/asyncapi.json' },
@@ -40,6 +48,10 @@ export interface HttpHandlerDeps {
 	discovery: SessionDiscovery;
 	sessionWatcher: SessionWatcher;
 	broadcast: (event: EventEnvelope) => void;
+	/** Returns the current number of connected WebSocket clients */
+	clientCount: () => number;
+	/** Maximum allowed simultaneous connections */
+	maxConnections: number;
 }
 
 export async function handleHttpRequest(
@@ -72,7 +84,11 @@ export async function handleHttpRequest(
 	// AsyncAPI docs UI
 	if (url.pathname === "/docs") {
 		return new Response(DOCS_HTML, {
-			headers: { "Content-Type": "text/html; charset=utf-8" },
+			headers: {
+				"Content-Type": "text/html; charset=utf-8",
+				"Content-Security-Policy":
+					"default-src 'none'; style-src https://unpkg.com 'unsafe-inline'; script-src https://unpkg.com 'unsafe-inline'; connect-src 'self'",
+			},
 		});
 	}
 
@@ -116,6 +132,14 @@ export async function handleHttpRequest(
 		);
 	}
 
+	// Reject new connections when at capacity
+	if (deps.clientCount() >= deps.maxConnections) {
+		logger.warn("connection limit reached, rejecting upgrade", {
+			limit: deps.maxConnections,
+		});
+		return new Response("Too many connections", { status: 503 });
+	}
+
 	// WebSocket upgrade
 	const upgraded = server.upgrade(req, {
 		data: {
@@ -125,6 +149,8 @@ export async function handleHttpRequest(
 			rawLogSessions: new Set(),
 			lastPingAt: null,
 			pongTimer: null,
+			lastReplayAt: null,
+			activeHistoryRequests: 0,
 		},
 	});
 	if (!upgraded) {

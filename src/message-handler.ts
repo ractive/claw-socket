@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { logger } from "./logger.ts";
 import { ClientMessageSchema, type Snapshot } from "./schemas/index.ts";
 import type { SessionDiscovery } from "./session-discovery.ts";
 import { readSessionHistory } from "./session-history.ts";
@@ -7,6 +8,10 @@ import { topicMatches } from "./topic-matcher.ts";
 import type { UsageTracker } from "./usage-tracker.ts";
 import type { ClientData, ReplayBuffer } from "./ws-utils.ts";
 import { sendReplay } from "./ws-utils.ts";
+
+const MAX_CONCURRENT_HISTORY = 2;
+const REPLAY_RATE_LIMIT_MS = 1_000;
+const MAX_RAW_LOG_SUBSCRIPTIONS = 50;
 
 export interface MessageHandlerDeps {
 	safeSend: (ws: ServerWebSocket<ClientData>, msg: string) => void;
@@ -44,11 +49,11 @@ export function handleMessage(
 
 	const result = ClientMessageSchema.safeParse(parsed);
 	if (!result.success) {
+		logger.debug("invalid client message", { issues: result.error.issues });
 		safeSend(
 			ws,
 			JSON.stringify({
 				error: "invalid message",
-				details: result.error.issues,
 			}),
 		);
 		return;
@@ -118,7 +123,18 @@ export function handleMessage(
 		}
 
 		case "get_session_history": {
+			if (ws.data.activeHistoryRequests >= MAX_CONCURRENT_HISTORY) {
+				safeSend(
+					ws,
+					JSON.stringify({
+						error: "rate_limited",
+						message: `max ${MAX_CONCURRENT_HISTORY} concurrent get_session_history requests`,
+					}),
+				);
+				break;
+			}
 			const { sessionId, limit = 1000 } = msg;
+			ws.data.activeHistoryRequests++;
 			readSessionHistory(sessionId, limit, sessionWatcher, discovery)
 				.then((events) => {
 					safeSend(
@@ -139,17 +155,46 @@ export function handleMessage(
 							events: [],
 						}),
 					);
+				})
+				.finally(() => {
+					ws.data.activeHistoryRequests--;
 				});
 			break;
 		}
 
 		case "subscribe_agent_log": {
+			if (ws.data.rawLogSessions.size >= MAX_RAW_LOG_SUBSCRIPTIONS) {
+				safeSend(
+					ws,
+					JSON.stringify({
+						error: "limit_exceeded",
+						message: `max ${MAX_RAW_LOG_SUBSCRIPTIONS} agent log subscriptions per client`,
+					}),
+				);
+				break;
+			}
 			ws.data.rawLogSessions.add(msg.sessionId);
 			safeSend(
 				ws,
 				JSON.stringify({
 					type: "subscribed_agent_log",
 					sessionId: msg.sessionId,
+				}),
+			);
+			break;
+		}
+
+		case "unsubscribe_agent_log": {
+			if (msg.sessionId !== undefined) {
+				ws.data.rawLogSessions.delete(msg.sessionId);
+			} else {
+				ws.data.rawLogSessions.clear();
+			}
+			safeSend(
+				ws,
+				JSON.stringify({
+					type: "unsubscribed_agent_log",
+					sessionId: msg.sessionId ?? null,
 				}),
 			);
 			break;
@@ -214,6 +259,19 @@ export function handleMessage(
 		}
 
 		case "replay": {
+			const now = Date.now();
+			const lastReplayAt = ws.data.lastReplayAt;
+			if (lastReplayAt !== null && now - lastReplayAt < REPLAY_RATE_LIMIT_MS) {
+				safeSend(
+					ws,
+					JSON.stringify({
+						error: "rate_limited",
+						message: "replay is limited to 1 request per second",
+					}),
+				);
+				break;
+			}
+			ws.data.lastReplayAt = now;
 			sendReplay(ws, msg.lastSeq, replayBuffer, safeSend);
 			break;
 		}
