@@ -27,7 +27,8 @@ export interface CliOptions {
 export function parseArgs(argv: string[]): CliOptions {
 	const args = argv.slice(2); // strip node/bun + script path
 
-	let port = parseInt(process.env["CLAW_SOCKET_PORT"] ?? "3838", 10);
+	let port = Number.parseInt(process.env["CLAW_SOCKET_PORT"] ?? "3838", 10);
+	if (Number.isNaN(port)) port = 3838;
 	let host = process.env["CLAW_SOCKET_HOST"] ?? "localhost";
 	let verbose = false;
 	let noHooks = false;
@@ -132,7 +133,10 @@ export async function runCli(argv: string[]): Promise<void> {
 		}
 	}
 
+	let shuttingDown = false;
 	async function shutdown(): Promise<void> {
+		if (shuttingDown) return;
+		shuttingDown = true;
 		log.info("shutting down...");
 		await app.stop();
 		process.exit(0);

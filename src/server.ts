@@ -369,6 +369,7 @@ export function createServer(options: ServerOptions = {}) {
 	const server = Bun.serve<ClientData>({
 		port,
 		hostname,
+		maxRequestBodySize: 1_048_576, // 1 MB — enforced at the Bun level before buffering
 		async fetch(req, server) {
 			const url = new URL(req.url);
 
@@ -731,10 +732,12 @@ export function createServer(options: ServerOptions = {}) {
 				}
 			}
 
-			// Grace period for in-flight operations
-			await new Promise<void>((resolve) =>
-				setTimeout(resolve, SHUTDOWN_GRACE_MS),
-			);
+			// Grace period for in-flight operations (skip if no clients remain)
+			if (clients.size > 0) {
+				await new Promise<void>((resolve) =>
+					setTimeout(resolve, SHUTDOWN_GRACE_MS),
+				);
+			}
 
 			sessionWatcher.stop();
 			discovery.stop();
