@@ -78,6 +78,38 @@ Client connects → ws://localhost:<port>
 
 ### 6. Hook Events
 
+**Implemented (iter-03)** — received via `POST /hook` from Claude Code HTTP hooks:
+
+| Event | Description | Key Fields |
+|-------|-------------|------------|
+| `hook.pre_tool_use` | Tool about to execute | toolName, toolUseId, inputSummary, tool_input |
+| `hook.post_tool_use` | Tool finished successfully | toolName, toolUseId, outputSummary, tool_response |
+| `hook.post_tool_use_failure` | Tool execution failed | toolName, error, isInterrupt |
+| `hook.session_start` | Claude Code session started | source, agent_type, model |
+| `hook.session_end` | Claude Code session ended | reason |
+| `hook.stop` | Stop hook fired | stop_hook_active, last_assistant_message |
+| `hook.subagent_start` | Subagent spawned | agent_id, agent_type, agent_transcript_path |
+| `hook.subagent_stop` | Subagent finished | agent_id, agent_transcript_path |
+| `hook.permission_request` | Permission prompt shown | tool_name, permission_suggestions |
+| `hook.permission_denied` | Permission denied | tool_name, reason |
+| `hook.task_created` | Claude Code task created | task_id, task_subject, teammate_name |
+| `hook.task_completed` | Claude Code task completed | task_id, task_subject, teammate_name |
+| `hook.teammate_idle` | Teammate waiting for work | teammate_name, team_name |
+| `hook.notification` | Notification fired | message, title, notification_type |
+| `hook.user_prompt_submit` | User submitted a prompt | prompt text |
+| `hook.pre_compact` | About to compact context | trigger |
+| `hook.post_compact` | Compaction finished | compact_summary |
+| `hook.config_change` | Config file changed | source, file_path |
+| `hook.instructions_loaded` | Instructions file loaded | file_path, memory_type, load_reason |
+| `hook.cwd_changed` | Working directory changed | old_cwd, new_cwd |
+| `hook.file_changed` | File modified/added/removed | file_path, event |
+| `hook.elicitation` | MCP elicitation started | mcp_server_name, mode, schema |
+| `hook.elicitation_result` | MCP elicitation result | mcp_server_name |
+| `hook.worktree_create` | Git worktree created | name, worktree_path |
+| `hook.worktree_remove` | Git worktree removed | name, worktree_path |
+
+**Planned (iter-07)** — parsed from JSONL system messages about hook execution lifecycle:
+
 | Event | Description | Key Fields |
 |-------|-------------|------------|
 | `hook.started` | Hook execution began | sessionId, hookId, hookName, hookEvent |

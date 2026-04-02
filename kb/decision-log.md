@@ -86,3 +86,39 @@ date: 2026-04-02
 - Maps naturally to Bun's pub/sub topics
 - Clients subscribe only to what they need
 - Reduces bandwidth for lightweight consumers
+
+---
+
+## D006: Single-port hook endpoint (not separate HTTP server)
+
+**Date**: 2026-04-02
+**Status**: Accepted
+
+**Context**: Need to accept HTTP hook callbacks from Claude Code. busy-agents uses two ports: HTTP (7890) for hooks + static files, WS (7891) for real-time. We need to decide whether to follow that pattern or combine them.
+
+**Decision**: Add `POST /hook` to the existing `Bun.serve()` `fetch` handler alongside `/health` and the WebSocket upgrade — single port for everything.
+
+**Rationale**:
+- Bun's `fetch` handler already routes both HTTP and WS on the same port
+- Simpler deployment: one port to configure, one URL for hooks
+- No coordination needed between two servers
+- Hook installer only needs to know one port
+
+**Tradeoffs**: If we later add static file serving (like busy-agents' game UI), we may want a separate HTTP server for serving assets with caching headers. That can be split out then.
+
+---
+
+## D007: Hook events use `hook.*` namespace, not merged into `tool.*`
+
+**Date**: 2026-04-02
+**Status**: Accepted
+
+**Context**: Claude Code hooks (PreToolUse, PostToolUse) overlap with JSONL-sourced tool events (tool.started, tool.completed). Should we merge them into a single event stream or keep them separate?
+
+**Decision**: Emit hooks as `hook.<snake_case_type>` (e.g. `hook.pre_tool_use`) and let JSONL events continue as `tool.*`. Both feed into the agent tracker for state updates. Clients choose granularity via topic subscriptions.
+
+**Rationale**:
+- Hooks arrive before JSONL writes (lower latency) and carry different data (e.g. `tool_response` in PostToolUse)
+- Keeping them separate avoids deduplication complexity and lets clients subscribe to exactly what they want
+- Agent tracker handles both sources, so state is always consistent
+- `hook.*` and `tool.*` are independently useful: hooks for real-time UI, JSONL for post-hoc analysis

@@ -5,7 +5,7 @@ tags:
   - iteration
   - hooks
   - events
-status: in-progress
+status: completed
 iteration: 3
 ---
 
