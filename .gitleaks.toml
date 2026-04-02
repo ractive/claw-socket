@@ -10,6 +10,4 @@ description = "Paths excluded from secret scanning"
 paths = [
   # Lock files contain hashes that can trigger false positives
   '''bun\.lock''',
-  # Test fixtures may contain example/placeholder values
-  '''test/.*''',
 ]
