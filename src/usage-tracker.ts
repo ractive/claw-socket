@@ -28,7 +28,7 @@ export interface GlobalUsage {
 	modelBreakdown: Record<string, ModelUsage>;
 }
 
-export type UsageEventCallback = (
+type UsageEventCallback = (
 	type: string,
 	sessionId: string,
 	data: Record<string, unknown>,
@@ -48,10 +48,6 @@ export class UsageTracker {
 
 	constructor(onEvent?: UsageEventCallback) {
 		this.onEvent = onEvent ?? null;
-	}
-
-	setEventCallback(cb: UsageEventCallback): void {
-		this.onEvent = cb;
 	}
 
 	private getOrCreate(sessionId: string): SessionUsage {
@@ -153,20 +149,11 @@ export class UsageTracker {
 		const session = this.getOrCreate(event.sessionId);
 		session.lastUpdatedAt = Date.now();
 
-		const d = event.data;
-		const totalCostUsd = extractNumber(
-			d as Record<string, unknown>,
-			"totalCostUsd",
-		);
-		const durationMs = extractNumber(
-			d as Record<string, unknown>,
-			"durationMs",
-		);
-		const durationApiMs = extractNumber(
-			d as Record<string, unknown>,
-			"durationApiMs",
-		);
-		const numTurns = extractNumber(d as Record<string, unknown>, "numTurns");
+		const d = event.data as Record<string, unknown>;
+		const totalCostUsd = extractNumber(d, "totalCostUsd");
+		const durationMs = extractNumber(d, "durationMs");
+		const durationApiMs = extractNumber(d, "durationApiMs");
+		const numTurns = extractNumber(d, "numTurns");
 
 		if (totalCostUsd !== undefined) session.totalCostUsd = totalCostUsd;
 		if (durationMs !== undefined) session.durationMs = durationMs;
@@ -212,11 +199,6 @@ export class UsageTracker {
 						costUsd: mCost,
 					});
 				}
-			}
-
-			// If total cost is known but no per-model cost set, apportion to known models
-			if (totalCostUsd !== undefined && session.modelBreakdown.size === 0) {
-				// No model breakdown available — cost is tracked at session level only
 			}
 		}
 

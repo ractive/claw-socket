@@ -1,30 +1,11 @@
 import type { ParsedEvent } from "./jsonl-parser.ts";
+import type {
+	AgentState,
+	AgentStatus,
+	ToolHistoryEntry,
+} from "./schemas/agent.ts";
 
-export type AgentStatus = "working" | "tool_running" | "idle" | "offline";
-
-export interface ToolHistoryEntry {
-	toolName: string;
-	inputSummary: string;
-	durationMs: number;
-	success: boolean;
-	startedAt: number;
-}
-
-export interface AgentState {
-	agentId: string;
-	agentType: string;
-	sessionId: string;
-	status: AgentStatus;
-	currentTool?: string;
-	currentToolInput?: string;
-	startedAt: number;
-	lastActivityAt: number;
-	toolCount: number;
-	tokenCount: number;
-	cwd: string;
-	name?: string;
-	toolHistory: ToolHistoryEntry[];
-}
+export type { AgentState, AgentStatus, ToolHistoryEntry };
 
 export interface AgentTrackerOptions {
 	stalenessThresholdMs?: number;
@@ -34,6 +15,29 @@ export interface AgentTrackerOptions {
 const MAX_TOOL_HISTORY = 10;
 const DEFAULT_STALENESS_THRESHOLD_MS = 30_000;
 const DEFAULT_STALENESS_CHECK_INTERVAL_MS = 5_000;
+
+interface ToolFields {
+	toolName: string;
+	inputSummary: string;
+	toolUseId: string | undefined;
+}
+
+/**
+ * Extract normalised tool identity fields from a hook or JSONL event data object.
+ * Handles both camelCase (hook-handler-enriched) and snake_case (raw hook) keys.
+ */
+function extractToolFields(data: Record<string, unknown>): ToolFields {
+	const rawName = data["toolName"] ?? data["tool_name"];
+	const toolName = typeof rawName === "string" ? rawName : "unknown";
+
+	const rawId = data["toolUseId"] ?? data["tool_use_id"];
+	const toolUseId = typeof rawId === "string" ? rawId : undefined;
+
+	const rawInput = data["inputSummary"];
+	const inputSummary = typeof rawInput === "string" ? rawInput : "";
+
+	return { toolName, inputSummary, toolUseId };
+}
 
 export class AgentTracker {
 	private readonly agents = new Map<string, AgentState>();
@@ -183,84 +187,44 @@ export class AgentTracker {
 				if (!agent) break;
 				this.markActive(agent);
 				agent.status = "tool_running";
-				const toolName = event.data["toolName"] ?? event.data["tool_name"];
-				const toolInput = event.data["inputSummary"];
-				const toolUseId = event.data["toolUseId"] ?? event.data["tool_use_id"];
-				if (typeof toolName === "string") {
-					agent.currentTool = toolName;
-				}
-				if (typeof toolInput === "string") {
-					agent.currentToolInput = toolInput;
-				}
-				if (typeof toolUseId === "string") {
+				const { toolName, inputSummary, toolUseId } = extractToolFields(
+					event.data,
+				);
+				agent.currentTool = toolName;
+				agent.currentToolInput = inputSummary;
+				if (toolUseId) {
 					this.inFlightTools.set(toolUseId, {
-						toolName: typeof toolName === "string" ? toolName : "unknown",
-						inputSummary: typeof toolInput === "string" ? toolInput : "",
+						toolName,
+						inputSummary,
 						startedAt: Date.now(),
 					});
 				}
 				break;
 			}
 
-			case "hook.post_tool_use": {
-				if (!agent) break;
-				this.markActive(agent);
-				agent.status = "working";
-				const toolUseIdVal =
-					event.data["toolUseId"] ?? event.data["tool_use_id"];
-				const tracked =
-					typeof toolUseIdVal === "string"
-						? this.inFlightTools.get(toolUseIdVal)
-						: undefined;
-				if (typeof toolUseIdVal === "string") {
-					this.inFlightTools.delete(toolUseIdVal);
-				}
-				const toolName =
-					tracked?.toolName ??
-					event.data["toolName"] ??
-					event.data["tool_name"];
-				const inputSummary = tracked?.inputSummary ?? "";
-				const startedAtVal = tracked?.startedAt;
-				this.addToolHistory(agent, {
-					toolName: typeof toolName === "string" ? toolName : "unknown",
-					inputSummary: typeof inputSummary === "string" ? inputSummary : "",
-					durationMs:
-						typeof startedAtVal === "number" ? Date.now() - startedAtVal : 0,
-					success: true,
-					startedAt:
-						typeof startedAtVal === "number" ? startedAtVal : Date.now(),
-				});
-				agent.toolCount += 1;
-				delete agent.currentTool;
-				delete agent.currentToolInput;
-				break;
-			}
-
+			case "hook.post_tool_use":
 			case "hook.post_tool_use_failure": {
 				if (!agent) break;
 				this.markActive(agent);
 				agent.status = "working";
-				const toolUseIdVal =
-					event.data["toolUseId"] ?? event.data["tool_use_id"];
-				const tracked =
-					typeof toolUseIdVal === "string"
-						? this.inFlightTools.get(toolUseIdVal)
-						: undefined;
-				if (typeof toolUseIdVal === "string") {
-					this.inFlightTools.delete(toolUseIdVal);
+				const success = event.type === "hook.post_tool_use";
+				const { toolUseId } = extractToolFields(event.data);
+				const tracked = toolUseId
+					? this.inFlightTools.get(toolUseId)
+					: undefined;
+				if (toolUseId) {
+					this.inFlightTools.delete(toolUseId);
 				}
-				const toolName =
-					tracked?.toolName ??
-					event.data["toolName"] ??
-					event.data["tool_name"];
-				const inputSummary = tracked?.inputSummary ?? "";
+				const resolvedToolName =
+					tracked?.toolName ?? extractToolFields(event.data).toolName;
+				const resolvedInputSummary = tracked?.inputSummary ?? "";
 				const startedAtVal = tracked?.startedAt;
 				this.addToolHistory(agent, {
-					toolName: typeof toolName === "string" ? toolName : "unknown",
-					inputSummary: typeof inputSummary === "string" ? inputSummary : "",
+					toolName: resolvedToolName,
+					inputSummary: resolvedInputSummary,
 					durationMs:
 						typeof startedAtVal === "number" ? Date.now() - startedAtVal : 0,
-					success: false,
+					success,
 					startedAt:
 						typeof startedAtVal === "number" ? startedAtVal : Date.now(),
 				});

@@ -12,9 +12,9 @@ export type SessionEvent =
 			reason: "process_exited" | "file_removed";
 	  };
 
-export type SessionEventHandler = (event: SessionEvent) => void;
+type SessionEventHandler = (event: SessionEvent) => void;
 
-const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
+const DEFAULT_SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 const LIVENESS_INTERVAL_MS = 10_000;
 
 export class SessionDiscovery {
@@ -22,9 +22,14 @@ export class SessionDiscovery {
 	private watcher: FSWatcher | null = null;
 	private livenessTimer: ReturnType<typeof setInterval> | null = null;
 	private handler: SessionEventHandler;
+	private readonly sessionsDir: string;
 
-	constructor(handler: SessionEventHandler) {
+	constructor(
+		handler: SessionEventHandler,
+		sessionsDir: string = DEFAULT_SESSIONS_DIR,
+	) {
 		this.handler = handler;
+		this.sessionsDir = sessionsDir;
 	}
 
 	/** Get all currently tracked sessions */
@@ -65,7 +70,7 @@ export class SessionDiscovery {
 	private tryStartWatcher(): void {
 		if (this.watcher) return;
 		try {
-			this.watcher = watch(SESSIONS_DIR, (_eventType, filename) => {
+			this.watcher = watch(this.sessionsDir, (_eventType, filename) => {
 				if (!filename?.endsWith(".json")) return;
 				// Handle async errors to avoid unhandled rejections
 				this.handleFileChange(filename).catch(() => {});
@@ -78,7 +83,7 @@ export class SessionDiscovery {
 	private async scanSessions(): Promise<void> {
 		let files: string[];
 		try {
-			files = await readdir(SESSIONS_DIR);
+			files = await readdir(this.sessionsDir);
 		} catch {
 			return; // Dir doesn't exist yet
 		}
@@ -110,7 +115,7 @@ export class SessionDiscovery {
 	}
 
 	private async tryAddSession(filename: string): Promise<boolean> {
-		const filePath = join(SESSIONS_DIR, filename);
+		const filePath = join(this.sessionsDir, filename);
 		try {
 			const content = await readFile(filePath, "utf-8");
 			const parsed = SessionFileSchema.safeParse(JSON.parse(content));

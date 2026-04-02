@@ -1,3 +1,5 @@
+import { truncate } from "./utils.ts";
+
 export type ParsedEvent = {
 	type: string;
 	sessionId: string;
@@ -5,16 +7,11 @@ export type ParsedEvent = {
 	data: Record<string, unknown>;
 };
 
-export type ParsedEventHandler = (event: ParsedEvent) => void;
+type ParsedEventHandler = (event: ParsedEvent) => void;
 
 interface InFlightTool {
 	toolName: string;
 	startedAt: number;
-}
-
-function truncate(str: string, maxLen: number): string {
-	if (str.length <= maxLen) return str;
-	return str.slice(0, maxLen);
 }
 
 function extractText(content: unknown): string {
@@ -298,7 +295,7 @@ export class JsonlParser {
 		});
 	}
 
-	processContentBlockDelta(line: Record<string, unknown>): void {
+	private processContentBlockDelta(line: Record<string, unknown>): void {
 		const index = typeof line["index"] === "number" ? line["index"] : 0;
 		const delta = line["delta"];
 		if (typeof delta !== "object" || delta === null) return;
