@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { HookEventTypeSchema } from "./schemas/hook.ts";
 import { isRecord } from "./utils.ts";
@@ -35,7 +35,10 @@ async function writeSettings(
 	settings: Record<string, unknown>,
 ): Promise<void> {
 	await mkdir(dirname(settingsPath), { recursive: true });
-	const tmpPath = join(tmpdir(), `claude-settings-${Date.now()}.tmp`);
+	const tmpPath = join(
+		dirname(settingsPath),
+		`.claude-settings-${Date.now()}.tmp`,
+	);
 	await writeFile(tmpPath, `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
 	await rename(tmpPath, settingsPath);
 }
