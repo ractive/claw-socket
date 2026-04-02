@@ -1,11 +1,22 @@
 {
   "name": "claw-socket",
-  "module": "index.ts",
+  "version": "0.1.0",
+  "description": "Real-time WebSocket bridge that streams Claude Code events to any connected client",
+  "module": "src/index.ts",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "bin": {
+    "claw-socket": "src/index.ts"
+  },
+  "files": [
+    "src/",
+    "package.json",
+    "README.md"
+  ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --compile --outfile claw-socket",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check": "bunx biome check --write src/ test/ && bun run typecheck && bun test"

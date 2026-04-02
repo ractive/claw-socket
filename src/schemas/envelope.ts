@@ -7,6 +7,8 @@ export const EventEnvelopeSchema = z.object({
 	sessionId: z.string(),
 	agentId: z.string().optional(),
 	data: z.record(z.unknown()),
+	/** Monotonically increasing sequence number assigned by the server */
+	seq: z.number().int().nonnegative().optional(),
 });
 
 export type EventEnvelope = z.infer<typeof EventEnvelopeSchema>;
