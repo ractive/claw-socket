@@ -1,25 +1,20 @@
 import type { ServerWebSocket } from "bun";
-import { generateAsyncApiSpec } from "./asyncapi-generator.ts";
-import { processHookEvent } from "./hook-handler.ts";
-import { JsonlParser, type ParsedEvent } from "./jsonl-parser.ts";
+import { handleHttpRequest } from "./http-handler.ts";
 import { logger } from "./logger.ts";
+import { handleMessage, makeSnapshotSender } from "./message-handler.ts";
 import { envelope } from "./schemas/envelope.ts";
-import {
-	ClientMessageSchema,
-	type EventEnvelope,
-	type SessionInfo,
-	type Snapshot,
-} from "./schemas/index.ts";
+import type { EventEnvelope } from "./schemas/index.ts";
 import { SessionDiscovery, type SessionEvent } from "./session-discovery.ts";
-import { deriveJsonlPath, SessionWatcher } from "./session-watcher.ts";
+import { SessionWatcher } from "./session-watcher.ts";
 import { matchesAny, topicMatches } from "./topic-matcher.ts";
 import { UsageTracker } from "./usage-tracker.ts";
-
-/** Maximum JSONL file size to read for session history (10 MB) */
-const MAX_HISTORY_FILE_BYTES = 10 * 1_048_576;
-
-/** Backpressure drop threshold in bytes (1 MB). Close threshold is 4x this. */
-const DEFAULT_BACKPRESSURE_DROP_BYTES = 1_048_576;
+import {
+	type ClientData,
+	DEFAULT_BACKPRESSURE_DROP_BYTES,
+	DEFAULT_REPLAY_BUFFER_SIZE,
+	makeReplayBuffer,
+	makeSafeSend,
+} from "./ws-utils.ts";
 
 /** Heartbeat interval in milliseconds */
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -27,24 +22,8 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 /** How long to wait for a pong after a ping before closing (ms) */
 const PONG_TIMEOUT_MS = 10_000;
 
-/** Default replay buffer size (number of events) */
-const DEFAULT_REPLAY_BUFFER_SIZE = 1000;
-
 /** Grace period for graceful shutdown (ms) */
 const SHUTDOWN_GRACE_MS = 3_000;
-
-interface ClientData {
-	subscriptions: Set<string>;
-	sessionFilter: string | null;
-	/** Glob patterns stored for matching new event types discovered at runtime */
-	globPatterns: Set<string>;
-	/** Sessions the client wants to receive raw JSONL lines for */
-	rawLogSessions: Set<string>;
-	/** Last ping time (ms), used for pong tracking */
-	lastPingAt: number | null;
-	/** Timer handle for pong timeout */
-	pongTimer: ReturnType<typeof setTimeout> | null;
-}
 
 export interface ServerOptions {
 	port?: number;
@@ -67,55 +46,17 @@ export function createServer(options: ServerOptions = {}) {
 	const clients = new Set<ServerWebSocket<ClientData>>();
 
 	// -----------------------------------------------------------------------
-	// Sequence numbers and replay buffer
+	// Replay buffer and backpressure
 	// -----------------------------------------------------------------------
 
-	let nextSeq = 0;
-
-	interface BufferedEvent {
-		seq: number;
-		event: EventEnvelope & { seq: number };
-	}
-
-	const replayBuffer: BufferedEvent[] = [];
-
-	function assignSeq(ev: EventEnvelope): EventEnvelope & { seq: number } {
-		const seq = nextSeq++;
-		const stamped = { ...ev, seq };
-		replayBuffer.push({ seq, event: stamped });
-		if (replayBuffer.length > replayBufferSize) {
-			replayBuffer.shift();
-		}
-		return stamped;
-	}
+	const { assignSeq, getBuffer } = makeReplayBuffer(replayBufferSize);
+	const safeSend = makeSafeSend(backpressureDropLimit, backpressureCloseLimit);
 
 	// -----------------------------------------------------------------------
 	// All event types that have ever been seen
 	// -----------------------------------------------------------------------
 
 	const knownEventTypes = new Set<string>();
-
-	const usageTracker = new UsageTracker((type, sessionId, data) => {
-		broadcast(envelope(type, sessionId, data));
-	});
-
-	// -----------------------------------------------------------------------
-	// Backpressure-aware send
-	// -----------------------------------------------------------------------
-
-	function safeSend(ws: ServerWebSocket<ClientData>, msg: string): void {
-		const buffered = ws.getBufferedAmount();
-		if (buffered >= backpressureCloseLimit) {
-			logger.warn("closing slow client due to backpressure", { buffered });
-			ws.close(1008, "backpressure limit exceeded");
-			return;
-		}
-		if (buffered >= backpressureDropLimit) {
-			logger.warn("dropping message for slow client", { buffered });
-			return;
-		}
-		ws.send(msg);
-	}
 
 	// -----------------------------------------------------------------------
 	// Pub/sub helpers
@@ -139,8 +80,45 @@ export function createServer(options: ServerOptions = {}) {
 	}
 
 	// -----------------------------------------------------------------------
-	// Session watcher
+	// Broadcast
 	// -----------------------------------------------------------------------
+
+	function broadcastSystemError(
+		source: string,
+		message: string,
+		recoverable: boolean,
+	): void {
+		const ev = envelope("system.error", "", { source, message, recoverable });
+		const stamped = assignSeq(ev);
+		const msg = JSON.stringify(stamped);
+		for (const ws of clients) {
+			safeSend(ws, msg);
+		}
+	}
+
+	function broadcast(event: EventEnvelope): void {
+		registerEventType(event.type);
+
+		const stamped = assignSeq(event);
+		const msg = JSON.stringify(stamped);
+
+		for (const ws of clients) {
+			const data = ws.data;
+			if (data.subscriptions.size === 0) continue;
+			if (!matchesAny(event.type, data.subscriptions)) continue;
+			if (data.sessionFilter && event.sessionId !== data.sessionFilter)
+				continue;
+			safeSend(ws, msg);
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Core components
+	// -----------------------------------------------------------------------
+
+	const usageTracker = new UsageTracker((type, sessionId, data) => {
+		broadcast(envelope(type, sessionId, data));
+	});
 
 	const sessionWatcher = new SessionWatcher({
 		onEvent(event) {
@@ -211,128 +189,10 @@ export function createServer(options: ServerOptions = {}) {
 	});
 
 	// -----------------------------------------------------------------------
-	// Broadcast
+	// Snapshot sender
 	// -----------------------------------------------------------------------
 
-	function broadcastSystemError(
-		source: string,
-		message: string,
-		recoverable: boolean,
-	): void {
-		const ev = envelope("system.error", "", { source, message, recoverable });
-		const stamped = assignSeq(ev);
-		const msg = JSON.stringify(stamped);
-		for (const ws of clients) {
-			safeSend(ws, msg);
-		}
-	}
-
-	function broadcast(event: EventEnvelope): void {
-		registerEventType(event.type);
-
-		const stamped = assignSeq(event);
-		const msg = JSON.stringify(stamped);
-
-		for (const ws of clients) {
-			const data = ws.data;
-			if (data.subscriptions.size === 0) continue;
-			if (!matchesAny(event.type, data.subscriptions)) continue;
-			if (data.sessionFilter && event.sessionId !== data.sessionFilter)
-				continue;
-			safeSend(ws, msg);
-		}
-	}
-
-	// -----------------------------------------------------------------------
-	// Snapshot
-	// -----------------------------------------------------------------------
-
-	function sendSnapshot(ws: ServerWebSocket<ClientData>): void {
-		const snapshot: Snapshot = {
-			type: "snapshot",
-			sessions: discovery.getSessions(),
-			agents: sessionWatcher.getAgents(),
-		};
-		safeSend(ws, JSON.stringify(snapshot));
-	}
-
-	// -----------------------------------------------------------------------
-	// Replay
-	// -----------------------------------------------------------------------
-
-	function sendReplay(ws: ServerWebSocket<ClientData>, lastSeq: number): void {
-		const toReplay = replayBuffer.filter((b) => b.seq > lastSeq);
-		for (const { event } of toReplay) {
-			// Only send events that match the client's subscriptions
-			const data = ws.data;
-			if (data.subscriptions.size === 0) continue;
-			if (!matchesAny(event.type, data.subscriptions)) continue;
-			if (data.sessionFilter && event.sessionId !== data.sessionFilter)
-				continue;
-			safeSend(ws, JSON.stringify(event));
-		}
-	}
-
-	// -----------------------------------------------------------------------
-	// get_session_history helper
-	// -----------------------------------------------------------------------
-
-	async function readSessionHistory(
-		sessionId: string,
-		limit: number,
-	): Promise<ParsedEvent[]> {
-		let jsonlPath = sessionWatcher.getJsonlPath(sessionId);
-
-		if (!jsonlPath) {
-			const sessions = discovery.getSessions();
-			const found = sessions.find(
-				(s: SessionInfo) => s.sessionId === sessionId,
-			);
-			if (found) {
-				jsonlPath = deriveJsonlPath(sessionId, found.cwd);
-			}
-		}
-
-		if (!jsonlPath) {
-			return [];
-		}
-
-		const file = Bun.file(jsonlPath);
-		let text: string;
-		try {
-			const size = file.size;
-			if (size > MAX_HISTORY_FILE_BYTES) {
-				return [];
-			}
-			text = await file.text();
-		} catch {
-			return [];
-		}
-
-		const events: ParsedEvent[] = [];
-		const parser = new JsonlParser(sessionId, (event) => {
-			events.push(event);
-		});
-
-		for (const rawLine of text.split("\n")) {
-			const trimmed = rawLine.trim();
-			if (!trimmed) continue;
-			try {
-				const parsed: unknown = JSON.parse(trimmed);
-				if (
-					typeof parsed === "object" &&
-					parsed !== null &&
-					!Array.isArray(parsed)
-				) {
-					parser.processLine(parsed as Record<string, unknown>);
-				}
-			} catch {
-				// Skip malformed lines
-			}
-		}
-
-		return limit > 0 ? events.slice(-limit) : events;
-	}
+	const sendSnapshot = makeSnapshotSender(discovery, sessionWatcher, safeSend);
 
 	// -----------------------------------------------------------------------
 	// Heartbeat
@@ -346,7 +206,6 @@ export function createServer(options: ServerOptions = {}) {
 				if (ws.readyState !== 1 /* OPEN */) continue;
 				ws.data.lastPingAt = Date.now();
 				ws.ping();
-				// Schedule pong timeout
 				ws.data.pongTimer = setTimeout(() => {
 					logger.warn("client did not respond to ping, closing");
 					ws.close(1001, "ping timeout");
@@ -371,126 +230,11 @@ export function createServer(options: ServerOptions = {}) {
 		hostname,
 		maxRequestBodySize: 1_048_576, // 1 MB — enforced at the Bun level before buffering
 		async fetch(req, server) {
-			const url = new URL(req.url);
-
-			// Health check
-			if (url.pathname === "/health") {
-				return new Response(
-					JSON.stringify({
-						status: "ok",
-						sessions: discovery.getSessions().length,
-					}),
-					{
-						headers: { "Content-Type": "application/json" },
-					},
-				);
-			}
-
-			// AsyncAPI spec
-			if (url.pathname === "/asyncapi.json") {
-				return new Response(JSON.stringify(generateAsyncApiSpec(), null, 2), {
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-
-			// AsyncAPI docs UI
-			if (url.pathname === "/docs") {
-				const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>claw-socket API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/@asyncapi/react-component@latest/styles/default.min.css">
-</head>
-<body>
-  <div id="asyncapi"></div>
-  <script src="https://unpkg.com/@asyncapi/react-component@latest/browser/standalone/index.js"></script>
-  <script>
-    AsyncApiComponent.render({
-      schema: { url: '/asyncapi.json' },
-      config: { show: { sidebar: true } }
-    }, document.getElementById('asyncapi'));
-  </script>
-</body>
-</html>`;
-				return new Response(html, {
-					headers: { "Content-Type": "text/html; charset=utf-8" },
-				});
-			}
-
-			// Hook endpoint
-			if (req.method === "POST" && url.pathname === "/hook") {
-				const maxBytes = 1_048_576;
-				let text: string;
-				try {
-					text = await req.text();
-				} catch {
-					return new Response(JSON.stringify({ error: "invalid JSON" }), {
-						status: 400,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-				if (text.length > maxBytes) {
-					return new Response(JSON.stringify({ error: "payload too large" }), {
-						status: 413,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-
-				let body: unknown;
-				try {
-					body = JSON.parse(text);
-				} catch {
-					return new Response(JSON.stringify({ error: "invalid JSON" }), {
-						status: 400,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-
-				const result = processHookEvent(body);
-				if (!result.ok) {
-					return new Response(
-						JSON.stringify({ error: "invalid hook payload" }),
-						{ status: 400, headers: { "Content-Type": "application/json" } },
-					);
-				}
-
-				for (const event of result.events) {
-					try {
-						sessionWatcher.handleExternalEvent(event);
-						broadcast(
-							envelope(event.type, event.sessionId, event.data, event.agentId),
-						);
-					} catch (err) {
-						logger.error("error processing hook event", {
-							error: String(err),
-							eventType: event.type,
-						});
-					}
-				}
-
-				return new Response(
-					JSON.stringify({ status: "ok", eventsEmitted: result.events.length }),
-					{ status: 200, headers: { "Content-Type": "application/json" } },
-				);
-			}
-
-			// WebSocket upgrade
-			const upgraded = server.upgrade(req, {
-				data: {
-					subscriptions: new Set(),
-					sessionFilter: null,
-					globPatterns: new Set(),
-					rawLogSessions: new Set(),
-					lastPingAt: null,
-					pongTimer: null,
-				},
+			return handleHttpRequest(req, server, {
+				discovery,
+				sessionWatcher,
+				broadcast,
 			});
-			if (!upgraded) {
-				return new Response("WebSocket upgrade failed", { status: 400 });
-			}
-			return undefined;
 		},
 
 		websocket: {
@@ -509,7 +253,6 @@ export function createServer(options: ServerOptions = {}) {
 			},
 
 			pong(ws) {
-				// Clear the pong timeout when pong is received
 				if (ws.data.pongTimer !== null) {
 					clearTimeout(ws.data.pongTimer);
 					ws.data.pongTimer = null;
@@ -518,191 +261,15 @@ export function createServer(options: ServerOptions = {}) {
 			},
 
 			message(ws, message) {
-				const text = typeof message === "string" ? message : message.toString();
-				let parsed: unknown;
-				try {
-					parsed = JSON.parse(text);
-				} catch {
-					safeSend(ws, JSON.stringify({ error: "invalid JSON" }));
-					return;
-				}
-
-				const result = ClientMessageSchema.safeParse(parsed);
-				if (!result.success) {
-					safeSend(
-						ws,
-						JSON.stringify({
-							error: "invalid message",
-							details: result.error.issues,
-						}),
-					);
-					return;
-				}
-
-				const msg = result.data;
-
-				switch (msg.type) {
-					case "subscribe": {
-						for (const topic of msg.topics) {
-							ws.data.subscriptions.add(topic);
-							if (topic.includes("*")) {
-								ws.data.globPatterns.add(topic);
-								for (const knownType of knownEventTypes) {
-									if (topicMatches(knownType, topic)) {
-										ws.subscribe(knownType);
-										if (msg.sessionId) {
-											ws.subscribe(`${msg.sessionId}/${knownType}`);
-										}
-									}
-								}
-							} else {
-								ws.subscribe(topic);
-								if (msg.sessionId) {
-									ws.subscribe(`${msg.sessionId}/${topic}`);
-								}
-							}
-						}
-						ws.data.sessionFilter = msg.sessionId ?? null;
-						safeSend(
-							ws,
-							JSON.stringify({
-								type: "subscribed",
-								topics: Array.from(ws.data.subscriptions),
-							}),
-						);
-						break;
-					}
-
-					case "unsubscribe": {
-						for (const topic of msg.topics) {
-							ws.data.subscriptions.delete(topic);
-							ws.data.globPatterns.delete(topic);
-							ws.unsubscribe(topic);
-							if (ws.data.sessionFilter) {
-								ws.unsubscribe(`${ws.data.sessionFilter}/${topic}`);
-							}
-						}
-						safeSend(
-							ws,
-							JSON.stringify({
-								type: "unsubscribed",
-								topics: Array.from(ws.data.subscriptions),
-							}),
-						);
-						break;
-					}
-
-					case "get_snapshot":
-						sendSnapshot(ws);
-						break;
-
-					case "get_session_list": {
-						const sessions = discovery.getSessions();
-						safeSend(ws, JSON.stringify({ type: "session_list", sessions }));
-						break;
-					}
-
-					case "get_session_history": {
-						const { sessionId, limit = 1000 } = msg;
-						readSessionHistory(sessionId, limit)
-							.then((events) => {
-								safeSend(
-									ws,
-									JSON.stringify({
-										type: "session_history",
-										sessionId,
-										events,
-									}),
-								);
-							})
-							.catch(() => {
-								safeSend(
-									ws,
-									JSON.stringify({
-										type: "session_history",
-										sessionId,
-										events: [],
-									}),
-								);
-							});
-						break;
-					}
-
-					case "subscribe_agent_log": {
-						ws.data.rawLogSessions.add(msg.sessionId);
-						safeSend(
-							ws,
-							JSON.stringify({
-								type: "subscribed_agent_log",
-								sessionId: msg.sessionId,
-							}),
-						);
-						break;
-					}
-
-					case "get_usage": {
-						if (msg.sessionId) {
-							const sessionUsage = usageTracker.getSessionUsage(msg.sessionId);
-							const modelBreakdown: Record<
-								string,
-								{ inputTokens: number; outputTokens: number; costUsd: number }
-							> = {};
-							if (sessionUsage) {
-								for (const [model, usage] of sessionUsage.modelBreakdown) {
-									modelBreakdown[model] = { ...usage };
-								}
-							}
-							safeSend(
-								ws,
-								JSON.stringify({
-									type: "usage",
-									sessionId: msg.sessionId,
-									...(sessionUsage
-										? {
-												inputTokens: sessionUsage.inputTokens,
-												outputTokens: sessionUsage.outputTokens,
-												cacheCreationInputTokens:
-													sessionUsage.cacheCreationInputTokens,
-												cacheReadInputTokens: sessionUsage.cacheReadInputTokens,
-												totalCostUsd: sessionUsage.totalCostUsd,
-												durationMs: sessionUsage.durationMs,
-												durationApiMs: sessionUsage.durationApiMs,
-												numTurns: sessionUsage.numTurns,
-												modelBreakdown,
-												lastUpdatedAt: sessionUsage.lastUpdatedAt,
-											}
-										: {
-												inputTokens: 0,
-												outputTokens: 0,
-												cacheCreationInputTokens: 0,
-												cacheReadInputTokens: 0,
-												totalCostUsd: 0,
-												durationMs: 0,
-												durationApiMs: 0,
-												numTurns: 0,
-												modelBreakdown: {},
-												lastUpdatedAt: null,
-											}),
-								}),
-							);
-						} else {
-							const global = usageTracker.getGlobalUsage();
-							safeSend(
-								ws,
-								JSON.stringify({
-									type: "usage",
-									...global,
-								}),
-							);
-						}
-						break;
-					}
-
-					case "replay": {
-						sendReplay(ws, msg.lastSeq);
-						break;
-					}
-				}
+				handleMessage(ws, message, {
+					safeSend,
+					sendSnapshot,
+					replayBuffer: getBuffer(),
+					knownEventTypes,
+					discovery,
+					sessionWatcher,
+					usageTracker,
+				});
 			},
 		},
 	});
@@ -723,7 +290,6 @@ export function createServer(options: ServerOptions = {}) {
 		async stop(): Promise<void> {
 			stopHeartbeat();
 
-			// Close all connected clients with "going away"
 			for (const ws of clients) {
 				try {
 					ws.close(1001, "server going away");
@@ -732,7 +298,6 @@ export function createServer(options: ServerOptions = {}) {
 				}
 			}
 
-			// Grace period for in-flight operations (skip if no clients remain)
 			if (clients.size > 0) {
 				await new Promise<void>((resolve) =>
 					setTimeout(resolve, SHUTDOWN_GRACE_MS),

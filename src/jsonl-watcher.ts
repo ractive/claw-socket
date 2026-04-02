@@ -1,4 +1,4 @@
-export type JsonlLineHandler = (line: Record<string, unknown>) => void;
+type JsonlLineHandler = (line: Record<string, unknown>) => void;
 
 export interface JsonlWatcherOptions {
 	pollIntervalMs?: number;

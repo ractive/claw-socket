@@ -2,8 +2,9 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { HookEventTypeSchema } from "./schemas/hook.ts";
+import { isRecord } from "./utils.ts";
 
-const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
+const DEFAULT_SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 const HOOK_NAME = "claw-socket";
 
 /** Derived from the Zod schema so they stay in sync */
@@ -16,14 +17,12 @@ export interface InstallResult {
 	previouslyInstalled: boolean;
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-	return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-async function readSettings(): Promise<Record<string, unknown>> {
+async function readSettings(
+	settingsPath: string,
+): Promise<Record<string, unknown>> {
 	let content: string;
 	try {
-		content = await readFile(SETTINGS_PATH, "utf-8");
+		content = await readFile(settingsPath, "utf-8");
 	} catch (err: unknown) {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
 		throw err;
@@ -31,14 +30,17 @@ async function readSettings(): Promise<Record<string, unknown>> {
 	return JSON.parse(content) as Record<string, unknown>;
 }
 
-async function writeSettings(settings: Record<string, unknown>): Promise<void> {
-	await mkdir(dirname(SETTINGS_PATH), { recursive: true });
+async function writeSettings(
+	settingsPath: string,
+	settings: Record<string, unknown>,
+): Promise<void> {
+	await mkdir(dirname(settingsPath), { recursive: true });
 	const tmpPath = join(
-		dirname(SETTINGS_PATH),
+		dirname(settingsPath),
 		`.claude-settings-${Date.now()}.tmp`,
 	);
 	await writeFile(tmpPath, `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
-	await rename(tmpPath, SETTINGS_PATH);
+	await rename(tmpPath, settingsPath);
 }
 
 /**
@@ -47,13 +49,14 @@ async function writeSettings(settings: Record<string, unknown>): Promise<void> {
  */
 export async function installHook(
 	port: number,
-	options: { dryRun?: boolean } = {},
+	options: { dryRun?: boolean; settingsPath?: string } = {},
 ): Promise<InstallResult> {
+	const settingsPath = options.settingsPath ?? DEFAULT_SETTINGS_PATH;
 	const hookUrl = `http://localhost:${port}/hook`;
-	const settings = await readSettings();
+	const settings = await readSettings(settingsPath);
 
 	const existing = settings["hooks"];
-	const hooks = isPlainObject(existing) ? existing : {};
+	const hooks = isRecord(existing) ? existing : {};
 	const previouslyInstalled = HOOK_NAME in hooks;
 
 	// Build hook config: each event type maps to a command array
@@ -71,11 +74,11 @@ export async function installHook(
 	settings["hooks"] = hooks;
 
 	if (!options.dryRun) {
-		await writeSettings(settings);
+		await writeSettings(settingsPath, settings);
 	}
 
 	return {
-		settingsPath: SETTINGS_PATH,
+		settingsPath,
 		hookUrl,
 		events: HOOK_EVENTS,
 		previouslyInstalled,
@@ -87,12 +90,13 @@ export async function installHook(
  * Returns true if the hook was found and removed.
  */
 export async function uninstallHook(
-	options: { dryRun?: boolean } = {},
+	options: { dryRun?: boolean; settingsPath?: string } = {},
 ): Promise<boolean> {
-	const settings = await readSettings();
+	const settingsPath = options.settingsPath ?? DEFAULT_SETTINGS_PATH;
+	const settings = await readSettings(settingsPath);
 	const existing = settings["hooks"];
 
-	if (!isPlainObject(existing) || !(HOOK_NAME in existing)) {
+	if (!isRecord(existing) || !(HOOK_NAME in existing)) {
 		return false;
 	}
 
@@ -100,7 +104,7 @@ export async function uninstallHook(
 	settings["hooks"] = existing;
 
 	if (!options.dryRun) {
-		await writeSettings(settings);
+		await writeSettings(settingsPath, settings);
 	}
 
 	return true;

@@ -1,14 +1,10 @@
 import type { ParsedEvent } from "./jsonl-parser.ts";
 import { type HookPayload, HookPayloadSchema } from "./schemas/hook.ts";
+import { truncate } from "./utils.ts";
 
 /** Convert PascalCase hook type to snake_case for our event namespace */
 function toSnakeCase(s: string): string {
 	return s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-}
-
-function truncate(str: string, maxLen: number): string {
-	if (str.length <= maxLen) return str;
-	return str.slice(0, maxLen);
 }
 
 export type HookResult =
