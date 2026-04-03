@@ -1,7 +1,7 @@
 ---
 title: "Iteration 13: Proper AsyncAPI Docs (HTML + Markdown)"
 iteration: 13
-status: complete
+status: completed
 tags:
   - docs
   - dx
