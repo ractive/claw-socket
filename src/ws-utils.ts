@@ -24,6 +24,16 @@ export interface ClientData {
 	lastReplayAt: number | null;
 	/** Number of in-flight get_session_history requests, for concurrency limiting (max 2) */
 	activeHistoryRequests: number;
+	/** Messages received in the current rate-limit window */
+	messageCount: number;
+	/** Start of the current rate-limit window (ms) */
+	messageWindowStart: number;
+	/** Consecutive rate-limit violations (close after 3) */
+	rateLimitViolations: number;
+	/** Timestamp of the last message received from this client (ms) */
+	lastActivityAt: number;
+	/** Remote IP address, used for per-IP tracking on close */
+	remoteAddress: string;
 }
 
 export interface BufferedEvent {
