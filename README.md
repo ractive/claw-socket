@@ -144,8 +144,32 @@ function reconnect(ws) {
 |------|--------|-------------|
 | `/health` | GET | Server health check |
 | `/hook` | POST | Claude Code hook receiver |
-| `/asyncapi.json` | GET | AsyncAPI spec |
-| `/docs` | GET | AsyncAPI browser UI |
+| `/asyncapi.json` | GET | AsyncAPI spec (JSON) |
+| `/docs` | GET | AsyncAPI browser UI (requires generated docs, see below) |
+
+## Docs generation
+
+`/docs` serves pre-generated static HTML. Run the following after cloning or whenever the spec changes:
+
+```bash
+# 1. Export the AsyncAPI spec
+bun run export-spec
+
+# 2. Generate the HTML docs page (served at /docs)
+asyncapi generate fromTemplate asyncapi.json @asyncapi/html-template@3.5.4 \
+  --param singleFile=true -o public --force-write
+
+# 3. Generate the markdown reference (written to kb/docs/api-reference.md)
+asyncapi generate fromTemplate asyncapi.json @asyncapi/markdown-template@2.0.0 \
+  --param outFilename=api-reference.md -o kb/docs --force-write
+
+# 4. Patch sidebar layout bug in html-template output
+bun run patch-docs
+```
+
+Install the AsyncAPI CLI if needed: `npm install -g @asyncapi/cli` (or substitute `asyncapi` with `bunx @asyncapi/cli`).
+
+> **Note:** Step 4 patches a layout bug in `@asyncapi/html-template` where the fixed sidebar overflows its container. It's idempotent — safe to run multiple times.
 
 ## Security Scanning
 

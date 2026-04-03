@@ -16,34 +16,6 @@ function getAsyncApiSpecJson(): string {
 	return asyncApiSpecCache;
 }
 
-const ASYNCAPI_VERSION = "2.5.0";
-// SRI hashes generated from https://unpkg.com/@asyncapi/react-component@2.5.0/...
-// Regenerate with: openssl dgst -sha384 -binary <file> | openssl base64 -A
-const ASYNCAPI_CSS_INTEGRITY =
-	"sha384-LM7ebfJXIA4tw6896yik2GIpLWbNRZYGx44nQNEX1AbDyv8uxgg6bcURopAszNuI";
-const ASYNCAPI_JS_INTEGRITY =
-	"sha384-SI+XJmTQiKs8FckJZ0IuR268Fm+bspAQAWsrPW4T175WnL9Bz96N4+Z9N0yot51n";
-
-const DOCS_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>claw-socket API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/@asyncapi/react-component@${ASYNCAPI_VERSION}/styles/default.min.css" integrity="${ASYNCAPI_CSS_INTEGRITY}" crossorigin="anonymous">
-</head>
-<body>
-  <div id="asyncapi"></div>
-  <script src="https://unpkg.com/@asyncapi/react-component@${ASYNCAPI_VERSION}/browser/standalone/index.js" integrity="${ASYNCAPI_JS_INTEGRITY}" crossorigin="anonymous"></script>
-  <script>
-    AsyncApiStandalone.render({
-      schema: { url: '/asyncapi.json' },
-      config: { show: { sidebar: true } }
-    }, document.getElementById('asyncapi'));
-  </script>
-</body>
-</html>`;
-
 export interface HttpHandlerDeps {
 	discovery: SessionDiscovery;
 	sessionWatcher: SessionWatcher;
@@ -81,15 +53,19 @@ export async function handleHttpRequest(
 		});
 	}
 
-	// AsyncAPI docs UI
+	// AsyncAPI docs UI — served from pre-generated static file
 	if (url.pathname === "/docs") {
-		return new Response(DOCS_HTML, {
-			headers: {
-				"Content-Type": "text/html; charset=utf-8",
-				"Content-Security-Policy":
-					"default-src 'none'; style-src https://unpkg.com 'unsafe-inline'; script-src https://unpkg.com 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; font-src https://unpkg.com data:; img-src 'self' data: https:; worker-src blob:",
-			},
-		});
+		try {
+			const html = await Bun.file("public/index.html").text();
+			return new Response(html, {
+				headers: { "Content-Type": "text/html; charset=utf-8" },
+			});
+		} catch {
+			return new Response(
+				"Docs not generated yet. Run: bun run export-spec && asyncapi generate fromTemplate asyncapi.json @asyncapi/html-template@3.5.4 --param singleFile=true -o public --force-write",
+				{ status: 503 },
+			);
+		}
 	}
 
 	// Hook endpoint — body size is enforced by Bun's maxRequestBodySize at server level

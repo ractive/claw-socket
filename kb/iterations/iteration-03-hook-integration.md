@@ -5,8 +5,9 @@ tags:
   - iteration
   - hooks
   - events
-status: completed
+status: complete
 iteration: 3
+type: iteration
 ---
 
 # Iteration 03: Hook Integration & Rich Events

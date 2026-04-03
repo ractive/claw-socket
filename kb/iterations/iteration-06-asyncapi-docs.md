@@ -5,8 +5,9 @@ tags:
   - iteration
   - asyncapi
   - documentation
-status: done
+status: complete
 iteration: 6
+type: iteration
 ---
 
 # Iteration 06: AsyncAPI Spec & Documentation UI

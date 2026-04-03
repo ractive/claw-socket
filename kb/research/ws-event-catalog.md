@@ -1,9 +1,14 @@
 ---
 title: WebSocket Event Catalog Design
 description: All streams and events claw-socket could offer to WS clients
-tags: [design, events, websocket, catalog]
+tags:
+  - design
+  - events
+  - websocket
+  - catalog
 status: complete
 date: 2026-04-02
+type: research
 ---
 
 # WebSocket Event Catalog

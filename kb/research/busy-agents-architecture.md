@@ -1,10 +1,17 @@
 ---
 title: busy-agents Architecture Reference
-description: Analysis of the busy-agents project for inspiration on WS server design and event types
-tags: [research, busy-agents, architecture, reference]
+description: >-
+  Analysis of the busy-agents project for inspiration on WS server design and
+  event types
+tags:
+  - research
+  - busy-agents
+  - architecture
+  - reference
 status: complete
 date: 2026-04-02
 source: /Users/james/devel/busy-agents/
+type: research
 ---
 
 # busy-agents Architecture Reference

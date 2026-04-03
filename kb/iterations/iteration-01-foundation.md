@@ -6,6 +6,7 @@ tags:
   - foundation
 status: complete
 iteration: 1
+type: iteration
 ---
 
 # Iteration 01: Foundation

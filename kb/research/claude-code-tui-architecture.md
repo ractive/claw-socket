@@ -1,10 +1,18 @@
 ---
 title: Claude Code TUI Update Architecture
-description: How Claude Code's TUI receives real-time updates — the architecture we want to replicate
-tags: [research, claude-code, tui, architecture, websocket]
+description: >-
+  How Claude Code's TUI receives real-time updates — the architecture we want to
+  replicate
+tags:
+  - research
+  - claude-code
+  - tui
+  - architecture
+  - websocket
 status: complete
 date: 2026-04-02
 source: clear-code v2.1.88
+type: research
 ---
 
 # Claude Code TUI Update Architecture

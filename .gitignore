@@ -42,3 +42,7 @@ kb/.obsidian/
 # Claude Code worktrees
 .claude/worktrees/
 .claude/agent-memory/
+
+# Generated AsyncAPI artifacts
+asyncapi.json
+public/

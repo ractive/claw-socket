@@ -503,21 +503,16 @@ describe("/docs endpoint", () => {
 		expect(html).toContain("</html>");
 	});
 
-	test("page references AsyncAPI React component CDN", async () => {
+	test("GET /docs returns HTML or 503 with helpful message", async () => {
+		// public/index.html is generated offline by `bun run export-spec && asyncapi generate ...`
+		// In CI without pre-generated docs the endpoint returns 503; with docs it returns 200.
 		const res = await fetch(`http://localhost:${port}/docs`);
-		const html = await res.text();
-		expect(html).toContain("@asyncapi/react-component");
-	});
-
-	test("page loads spec from /asyncapi.json", async () => {
-		const res = await fetch(`http://localhost:${port}/docs`);
-		const html = await res.text();
-		expect(html).toContain("/asyncapi.json");
-	});
-
-	test("page includes AsyncApiStandalone.render call", async () => {
-		const res = await fetch(`http://localhost:${port}/docs`);
-		const html = await res.text();
-		expect(html).toContain("AsyncApiStandalone.render");
+		if (res.status === 200) {
+			expect(res.headers.get("content-type")).toContain("text/html");
+		} else {
+			expect(res.status).toBe(503);
+			const body = await res.text();
+			expect(body).toContain("bun run export-spec");
+		}
 	});
 });

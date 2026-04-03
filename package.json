@@ -41,6 +41,8 @@
     "build": "bun build src/index.ts --compile --outfile claw-socket",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "export-spec": "bun run scripts/export-spec.ts",
+    "patch-docs": "bun run scripts/patch-docs.ts",
     "check": "bunx biome check --write src/ test/ && bun run typecheck && bun test && bun audit"
   },
   "dependencies": {
