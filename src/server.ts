@@ -91,20 +91,7 @@ export function createServer(options: ServerOptions = {}) {
 	// -----------------------------------------------------------------------
 
 	function registerEventType(eventType: string): void {
-		if (knownEventTypes.has(eventType)) return;
 		knownEventTypes.add(eventType);
-
-		for (const ws of clients) {
-			for (const pattern of ws.data.globPatterns) {
-				if (topicMatches(eventType, pattern)) {
-					ws.subscribe(eventType);
-					if (ws.data.sessionFilter) {
-						ws.subscribe(`${ws.data.sessionFilter}/${eventType}`);
-					}
-					break;
-				}
-			}
-		}
 	}
 
 	// -----------------------------------------------------------------------
