@@ -16,6 +16,9 @@ function getAsyncApiSpecJson(): string {
 	return asyncApiSpecCache;
 }
 
+// Cached on first successful load — regenerate by restarting the server
+let docsHtmlCache: string | null = null;
+
 export interface HttpHandlerDeps {
 	discovery: SessionDiscovery;
 	sessionWatcher: SessionWatcher;
@@ -56,14 +59,19 @@ export async function handleHttpRequest(
 	// AsyncAPI docs UI — served from pre-generated static file
 	if (url.pathname === "/docs") {
 		try {
-			const html = await Bun.file("public/index.html").text();
-			return new Response(html, {
+			if (docsHtmlCache === null) {
+				docsHtmlCache = await Bun.file("public/index.html").text();
+			}
+			return new Response(docsHtmlCache, {
 				headers: { "Content-Type": "text/html; charset=utf-8" },
 			});
 		} catch {
 			return new Response(
-				"Docs not generated yet. Run: bun run export-spec && asyncapi generate fromTemplate asyncapi.json @asyncapi/html-template@3.5.4 --param singleFile=true -o public --force-write",
-				{ status: 503 },
+				"Docs not generated yet. Run:\n  bun run export-spec\n  asyncapi generate fromTemplate asyncapi.json @asyncapi/html-template@3.5.4 --param singleFile=true -o public --force-write\n  bun run patch-docs",
+				{
+					status: 503,
+					headers: { "Content-Type": "text/plain; charset=utf-8" },
+				},
 			);
 		}
 	}
