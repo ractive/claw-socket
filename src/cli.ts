@@ -1,4 +1,4 @@
-import { installHook } from "./hook-installer.ts";
+import { installHook, uninstallHook } from "./hook-installer.ts";
 import { createLogger, setLogger } from "./logger.ts";
 import { createServer } from "./server.ts";
 
@@ -12,6 +12,7 @@ Options:
   --verbose            Enable verbose logging
   --no-hooks           Skip hook installation
   --install-hooks      Install hooks and exit
+  --uninstall-hooks    Remove claw-socket hooks from Claude settings and exit
   --help               Show help
   --version            Show version
 `;
@@ -22,6 +23,7 @@ export interface CliOptions {
 	verbose: boolean;
 	noHooks: boolean;
 	installHooksOnly: boolean;
+	uninstallHooksOnly: boolean;
 }
 
 export function parseArgs(argv: string[]): CliOptions {
@@ -33,6 +35,7 @@ export function parseArgs(argv: string[]): CliOptions {
 	let verbose = false;
 	let noHooks = false;
 	let installHooksOnly = false;
+	let uninstallHooksOnly = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -65,7 +68,24 @@ export function parseArgs(argv: string[]): CliOptions {
 				noHooks = true;
 				break;
 			case "--install-hooks":
+				if (uninstallHooksOnly) {
+					// biome-ignore lint/suspicious/noConsole: CLI error output before logger is initialised
+					console.error(
+						"--install-hooks and --uninstall-hooks are mutually exclusive",
+					);
+					process.exit(1);
+				}
 				installHooksOnly = true;
+				break;
+			case "--uninstall-hooks":
+				if (installHooksOnly) {
+					// biome-ignore lint/suspicious/noConsole: CLI error output before logger is initialised
+					console.error(
+						"--install-hooks and --uninstall-hooks are mutually exclusive",
+					);
+					process.exit(1);
+				}
+				uninstallHooksOnly = true;
 				break;
 			case "--help":
 				process.stdout.write(HELP);
@@ -84,7 +104,7 @@ export function parseArgs(argv: string[]): CliOptions {
 		}
 	}
 
-	return { port, host, verbose, noHooks, installHooksOnly };
+	return { port, host, verbose, noHooks, installHooksOnly, uninstallHooksOnly };
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -115,6 +135,21 @@ export async function runCli(argv: string[]): Promise<void> {
 			}
 		} catch (err) {
 			log.error("failed to install hooks", { error: String(err) });
+			process.exit(1);
+		}
+		return;
+	}
+
+	if (opts.uninstallHooksOnly) {
+		try {
+			const removed = await uninstallHook();
+			if (removed) {
+				log.info("hooks uninstalled");
+			} else {
+				log.info("no claw-socket hooks found");
+			}
+		} catch (err) {
+			log.error("failed to uninstall hooks", { error: String(err) });
 			process.exit(1);
 		}
 		return;

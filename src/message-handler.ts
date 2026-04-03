@@ -21,6 +21,14 @@ export interface MessageHandlerDeps {
 	discovery: SessionDiscovery;
 	sessionWatcher: SessionWatcher;
 	usageTracker: UsageTracker;
+	onPatternSubscribe: (
+		ws: ServerWebSocket<ClientData>,
+		pattern: string,
+	) => void;
+	onPatternUnsubscribe: (
+		ws: ServerWebSocket<ClientData>,
+		pattern: string,
+	) => void;
 }
 
 export function handleMessage(
@@ -36,6 +44,8 @@ export function handleMessage(
 		discovery,
 		sessionWatcher,
 		usageTracker,
+		onPatternSubscribe,
+		onPatternUnsubscribe,
 	} = deps;
 
 	const text = typeof message === "string" ? message : message.toString();
@@ -65,6 +75,7 @@ export function handleMessage(
 		case "subscribe": {
 			for (const topic of msg.topics) {
 				ws.data.subscriptions.add(topic);
+				onPatternSubscribe(ws, topic);
 				if (topic.includes("*")) {
 					ws.data.globPatterns.add(topic);
 					for (const knownType of knownEventTypes) {
@@ -97,6 +108,7 @@ export function handleMessage(
 			for (const topic of msg.topics) {
 				ws.data.subscriptions.delete(topic);
 				ws.data.globPatterns.delete(topic);
+				onPatternUnsubscribe(ws, topic);
 				ws.unsubscribe(topic);
 				if (ws.data.sessionFilter) {
 					ws.unsubscribe(`${ws.data.sessionFilter}/${topic}`);

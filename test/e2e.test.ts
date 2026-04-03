@@ -250,9 +250,9 @@ describe("hook endpoint", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(hookPayload),
 		});
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(202);
 		const body = (await res.json()) as { status: string };
-		expect(body.status).toBe("ok");
+		expect(body.status).toBe("accepted");
 
 		ws.close();
 	});

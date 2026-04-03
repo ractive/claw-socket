@@ -27,6 +27,7 @@ Options:
   --verbose            Enable verbose logging
   --no-hooks           Skip hook installation
   --install-hooks      Install hooks and exit
+  --uninstall-hooks    Remove claw-socket hooks from Claude settings and exit
   --help               Show help
   --version            Show version
 ```
@@ -143,7 +144,7 @@ function reconnect(ws) {
 | Path | Method | Description |
 |------|--------|-------------|
 | `/health` | GET | Server health check |
-| `/hook` | POST | Claude Code hook receiver |
+| `/hook` | POST | Claude Code hook receiver — returns `202 {status:"accepted"}` |
 | `/asyncapi.json` | GET | AsyncAPI spec (JSON) |
 | `/docs` | GET | AsyncAPI browser UI (requires generated docs, see below) |
 
@@ -200,4 +201,8 @@ bun run build
 
 # Run in watch mode
 bun run dev
+
+# Install / uninstall Claude Code hooks manually
+bun run hooks:install
+bun run hooks:uninstall
 ```
