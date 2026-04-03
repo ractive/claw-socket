@@ -12,10 +12,20 @@ import { HookEventTypeSchema } from "./schemas/hook.ts";
 import { isRecord } from "./utils.ts";
 
 const DEFAULT_SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
-const HOOK_NAME = "claw-socket";
+const HOOK_TAG = "claw-socket";
 
-/** Derived from the Zod schema so they stay in sync */
-const HOOK_EVENTS = HookEventTypeSchema.options;
+/** Events that Claude Code does not support as hook registration keys */
+const EXCLUDED_FROM_INSTALL = new Set([
+	"CwdChanged",
+	"FileChanged",
+	"PermissionDenied",
+	"TaskCreated",
+]);
+
+/** Events claw-socket registers hooks for (subset of HookEventTypeSchema) */
+const INSTALL_EVENTS = HookEventTypeSchema.options.filter(
+	(e) => !EXCLUDED_FROM_INSTALL.has(e),
+);
 
 export interface InstallResult {
 	settingsPath: string;
@@ -129,6 +139,20 @@ async function writeSettings(
 // Public API
 // ---------------------------------------------------------------------------
 
+function makeHookEntry(hookUrl: string): Record<string, unknown> {
+	return {
+		matcher: "",
+		hooks: [
+			{
+				type: "command",
+				command: `curl -sf --max-time 2 -X POST ${hookUrl} -H 'Content-Type: application/json' -d @- >/dev/null 2>&1`,
+				async: true,
+			},
+		],
+		_tag: HOOK_TAG,
+	};
+}
+
 /**
  * Install the claw-socket hook into Claude Code settings.
  * Returns the installation result. Pass dryRun=true to preview without writing.
@@ -143,23 +167,34 @@ export async function installHook(
 	if (!options.dryRun) await acquireLock(settingsPath);
 	try {
 		const settings = await readSettings(settingsPath);
+		const existingHooks = settings["hooks"];
+		const hooks = isRecord(existingHooks) ? { ...existingHooks } : {};
 
-		const existing = settings["hooks"];
-		const hooks = isRecord(existing) ? existing : {};
-		const previouslyInstalled = HOOK_NAME in hooks;
-
-		// Build hook config: each event type maps to a command array
-		const hookConfig: Record<string, unknown> = {};
-		for (const event of HOOK_EVENTS) {
-			hookConfig[event] = [
-				{
-					type: "http",
-					url: hookUrl,
-				},
-			];
+		// Check if already installed (any event has _tag: "claw-socket")
+		let previouslyInstalled = false;
+		for (const eventEntries of Object.values(hooks)) {
+			if (Array.isArray(eventEntries)) {
+				if (eventEntries.some((e) => isRecord(e) && e["_tag"] === HOOK_TAG)) {
+					previouslyInstalled = true;
+					break;
+				}
+			}
 		}
 
-		hooks[HOOK_NAME] = hookConfig;
+		const entry = makeHookEntry(hookUrl);
+
+		for (const event of INSTALL_EVENTS) {
+			const existing = hooks[event];
+			const arr: unknown[] = Array.isArray(existing) ? [...existing] : [];
+			const idx = arr.findIndex((e) => isRecord(e) && e["_tag"] === HOOK_TAG);
+			if (idx >= 0) {
+				arr[idx] = entry;
+			} else {
+				arr.push(entry);
+			}
+			hooks[event] = arr;
+		}
+
 		settings["hooks"] = hooks;
 
 		if (!options.dryRun) {
@@ -169,7 +204,7 @@ export async function installHook(
 		return {
 			settingsPath,
 			hookUrl,
-			events: HOOK_EVENTS,
+			events: INSTALL_EVENTS,
 			previouslyInstalled,
 		};
 	} finally {
@@ -189,14 +224,35 @@ export async function uninstallHook(
 	if (!options.dryRun) await acquireLock(settingsPath);
 	try {
 		const settings = await readSettings(settingsPath);
-		const existing = settings["hooks"];
+		const existingHooks = settings["hooks"];
 
-		if (!isRecord(existing) || !(HOOK_NAME in existing)) {
-			return false;
+		if (!isRecord(existingHooks)) return false;
+
+		let found = false;
+		const hooks = { ...existingHooks };
+
+		for (const [event, entries] of Object.entries(hooks)) {
+			if (!Array.isArray(entries)) continue;
+			const filtered = entries.filter(
+				(e) => !(isRecord(e) && e["_tag"] === HOOK_TAG),
+			);
+			if (filtered.length < entries.length) {
+				found = true;
+				if (filtered.length === 0) {
+					delete hooks[event];
+				} else {
+					hooks[event] = filtered;
+				}
+			}
 		}
 
-		delete existing[HOOK_NAME];
-		settings["hooks"] = existing;
+		if (!found) return false;
+
+		if (Object.keys(hooks).length === 0) {
+			delete settings["hooks"];
+		} else {
+			settings["hooks"] = hooks;
+		}
 
 		if (!options.dryRun) {
 			await writeSettings(settingsPath, settings);

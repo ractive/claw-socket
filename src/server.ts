@@ -6,7 +6,7 @@ import { envelope } from "./schemas/envelope.ts";
 import type { EventEnvelope } from "./schemas/index.ts";
 import { SessionDiscovery, type SessionEvent } from "./session-discovery.ts";
 import { SessionWatcher } from "./session-watcher.ts";
-import { matchesAny, topicMatches } from "./topic-matcher.ts";
+import { topicMatches } from "./topic-matcher.ts";
 import { UsageTracker } from "./usage-tracker.ts";
 import {
 	type ClientData,
@@ -48,6 +48,29 @@ export function createServer(options: ServerOptions = {}) {
 	const maxConnections = options.maxConnections ?? 100;
 
 	const clients = new Set<ServerWebSocket<ClientData>>();
+	const topicIndex = new Map<string, Set<ServerWebSocket<ClientData>>>();
+
+	function indexAdd(ws: ServerWebSocket<ClientData>, pattern: string): void {
+		let bucket = topicIndex.get(pattern);
+		if (!bucket) {
+			bucket = new Set();
+			topicIndex.set(pattern, bucket);
+		}
+		bucket.add(ws);
+	}
+
+	function indexRemove(ws: ServerWebSocket<ClientData>, pattern: string): void {
+		const bucket = topicIndex.get(pattern);
+		if (!bucket) return;
+		bucket.delete(ws);
+		if (bucket.size === 0) topicIndex.delete(pattern);
+	}
+
+	function indexRemoveAll(ws: ServerWebSocket<ClientData>): void {
+		for (const pattern of ws.data.subscriptions) {
+			indexRemove(ws, pattern);
+		}
+	}
 
 	// -----------------------------------------------------------------------
 	// Replay buffer and backpressure
@@ -114,11 +137,25 @@ export function createServer(options: ServerOptions = {}) {
 
 		const { json } = assignSeq(event);
 
-		for (const ws of clients) {
-			const data = ws.data;
-			if (data.subscriptions.size === 0) continue;
-			if (!matchesAny(event.type, data.subscriptions)) continue;
-			if (data.sessionFilter && event.sessionId !== data.sessionFilter)
+		// Collect targets via the topic index (O(P) where P = distinct patterns, typically < 10)
+		const targets = new Set<ServerWebSocket<ClientData>>();
+
+		const exact = topicIndex.get(event.type);
+		if (exact) for (const ws of exact) targets.add(ws);
+
+		const wild = topicIndex.get("*");
+		if (wild) for (const ws of wild) targets.add(ws);
+
+		for (const [pattern, bucket] of topicIndex) {
+			if (pattern !== "*" && pattern !== event.type && pattern.endsWith(".*")) {
+				if (topicMatches(event.type, pattern)) {
+					for (const ws of bucket) targets.add(ws);
+				}
+			}
+		}
+
+		for (const ws of targets) {
+			if (ws.data.sessionFilter && event.sessionId !== ws.data.sessionFilter)
 				continue;
 			safeSend(ws, json);
 		}
@@ -250,6 +287,7 @@ export function createServer(options: ServerOptions = {}) {
 				if (ws.data.pongTimer !== null) {
 					clearTimeout(ws.data.pongTimer);
 				}
+				indexRemoveAll(ws);
 				clients.delete(ws);
 				logger.debug("client disconnected", { total: clients.size });
 			},
@@ -271,6 +309,8 @@ export function createServer(options: ServerOptions = {}) {
 					discovery,
 					sessionWatcher,
 					usageTracker,
+					onPatternSubscribe: indexAdd,
+					onPatternUnsubscribe: indexRemove,
 				});
 			},
 		},

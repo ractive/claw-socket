@@ -81,13 +81,11 @@ const preToolUsePayload = {
 // ── HTTP endpoint tests ──────────────────────────────────────────────────────
 
 describe("POST /hook — HTTP responses", () => {
-	test("valid PreToolUse returns 200 with status ok", async () => {
+	test("valid PreToolUse returns 202 accepted", async () => {
 		const res = await postHook(preToolUsePayload);
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(202);
 		const body = (await res.json()) as Record<string, unknown>;
-		expect(body).toMatchObject({ status: "ok" });
-		expect(typeof body["eventsEmitted"]).toBe("number");
-		expect(body["eventsEmitted"] as number).toBeGreaterThan(0);
+		expect(body).toMatchObject({ status: "accepted" });
 	});
 
 	test("invalid JSON body returns 400", async () => {
@@ -136,7 +134,7 @@ describe("POST /hook — WS broadcast", () => {
 
 		const beforeCount = messages.length;
 		const res = await postHook(preToolUsePayload);
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(202);
 
 		await waitForMessages(messages, beforeCount + 1);
 
@@ -175,7 +173,7 @@ describe("POST /hook — WS broadcast", () => {
 
 		const beforeCount = messages.length;
 		const res = await postHook(subagentPayload);
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(202);
 
 		// Expect both hook.subagent_start and agent.started
 		await waitForMessages(messages, beforeCount + 2);

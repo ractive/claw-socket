@@ -102,24 +102,27 @@ export async function handleHttpRequest(
 			});
 		}
 
-		for (const event of result.events) {
-			try {
-				deps.sessionWatcher.handleExternalEvent(event);
-				deps.broadcast(
-					envelope(event.type, event.sessionId, event.data, event.agentId),
-				);
-			} catch (err) {
-				logger.error("error processing hook event", {
-					error: String(err),
-					eventType: event.type,
-				});
+		// Process asynchronously so response is returned immediately
+		queueMicrotask(() => {
+			for (const event of result.events) {
+				try {
+					deps.sessionWatcher.handleExternalEvent(event);
+					deps.broadcast(
+						envelope(event.type, event.sessionId, event.data, event.agentId),
+					);
+				} catch (err) {
+					logger.error("error processing hook event", {
+						error: String(err),
+						eventType: event.type,
+					});
+				}
 			}
-		}
+		});
 
-		return new Response(
-			JSON.stringify({ status: "ok", eventsEmitted: result.events.length }),
-			{ status: 200, headers: { "Content-Type": "application/json" } },
-		);
+		return new Response(JSON.stringify({ status: "accepted" }), {
+			status: 202,
+			headers: { "Content-Type": "application/json" },
+		});
 	}
 
 	// Reject new connections when at capacity

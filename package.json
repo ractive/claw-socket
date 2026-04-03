@@ -38,6 +38,8 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "hooks:install": "bun run src/index.ts --install-hooks",
+    "hooks:uninstall": "bun run src/index.ts --uninstall-hooks",
     "build": "bun build src/index.ts --compile --outfile claw-socket",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
