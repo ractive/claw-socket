@@ -21,4 +21,5 @@ if (components) {
 
 const json = JSON.stringify(spec, null, 2);
 await Bun.write("asyncapi.json", json);
+// biome-ignore lint/suspicious/noConsole: CLI script output
 console.log("Wrote asyncapi.json");

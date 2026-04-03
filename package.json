@@ -43,7 +43,7 @@
     "typecheck": "tsc --noEmit",
     "export-spec": "bun run scripts/export-spec.ts",
     "patch-docs": "bun run scripts/patch-docs.ts",
-    "check": "bunx biome check --write src/ test/ && bun run typecheck && bun test && bun audit"
+    "check": "bunx biome check --write src/ test/ scripts/ && bun run typecheck && bun test && bun audit"
   },
   "dependencies": {
     "zod": "^3.24",

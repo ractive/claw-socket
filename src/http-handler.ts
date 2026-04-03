@@ -56,16 +56,22 @@ export async function handleHttpRequest(
 		});
 	}
 
-	// AsyncAPI docs UI — served from pre-generated static file
+	// AsyncAPI docs UI — served from pre-generated static file (public/index.html relative to CWD)
 	if (url.pathname === "/docs") {
 		try {
 			if (docsHtmlCache === null) {
-				docsHtmlCache = await Bun.file("public/index.html").text();
+				const docsPath = `${process.cwd()}/public/index.html`;
+				docsHtmlCache = await Bun.file(docsPath).text();
 			}
 			return new Response(docsHtmlCache, {
 				headers: { "Content-Type": "text/html; charset=utf-8" },
 			});
-		} catch {
+		} catch (err) {
+			const notFound =
+				err instanceof Error && "code" in err && err.code === "ENOENT";
+			if (!notFound) {
+				logger.error("failed to read docs file", { error: String(err) });
+			}
 			return new Response(
 				"Docs not generated yet. Run:\n  bun run export-spec\n  asyncapi generate fromTemplate asyncapi.json @asyncapi/html-template@3.5.4 --param singleFile=true -o public --force-write\n  bun run patch-docs",
 				{
