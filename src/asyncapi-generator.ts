@@ -1910,9 +1910,11 @@ export function generateAsyncApiSpec(): object {
 	const asyncApiOperations: Record<string, object> = {};
 	const asyncApiMessages: Record<string, object> = {};
 
-	// Message trait for the common envelope fields
+	// Message trait documenting the common envelope payload fields.
+	// Uses `payload` (not `headers`) because these are JSON body fields, not
+	// protocol-level WebSocket headers.
 	const envelopeTrait = {
-		headers: {
+		payload: {
 			type: "object",
 			properties: {
 				type: {
@@ -1933,7 +1935,7 @@ export function generateAsyncApiSpec(): object {
 
 	for (const [channelKey, channelDef] of Object.entries(CHANNEL_REGISTRY)) {
 		const channelMessageRefs: Record<string, object> = {};
-		const safeChannelKey = channelKey.replace("/", "_");
+		const safeChannelKey = channelKey.replace(/\//g, "_");
 
 		for (const msg of channelDef.messages) {
 			const msgKey = msg.name.replace(/\./g, "_");
@@ -2072,7 +2074,7 @@ export function generateAsyncApiSpec(): object {
 				host: "localhost:3838",
 				protocol: "ws",
 				description:
-					"Default local server. Configure port via SERVER_PORT environment variable.",
+					"Default local server. Configure port via CLAW_SOCKET_PORT environment variable.",
 			},
 		},
 		channels: asyncApiChannels,
