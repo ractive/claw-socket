@@ -1,7 +1,7 @@
 ---
 title: "Iteration 14: Hook Fire-and-Forget, Installer Fix & Broadcast Performance"
 iteration: 14
-status: planned
+status: completed
 tags:
   - performance
   - reliability
