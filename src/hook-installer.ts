@@ -169,6 +169,8 @@ export async function installHook(
 		const settings = await readSettings(settingsPath);
 		const existingHooks = settings["hooks"];
 		const hooks = isRecord(existingHooks) ? { ...existingHooks } : {};
+		// Clean up legacy namespaced structure from older versions
+		delete hooks[HOOK_TAG];
 
 		// Check if already installed (any event has _tag: "claw-socket")
 		let previouslyInstalled = false;
@@ -230,6 +232,12 @@ export async function uninstallHook(
 
 		let found = false;
 		const hooks = { ...existingHooks };
+
+		// Clean up legacy namespaced structure from older versions
+		if (HOOK_TAG in hooks) {
+			delete hooks[HOOK_TAG];
+			found = true;
+		}
 
 		for (const [event, entries] of Object.entries(hooks)) {
 			if (!Array.isArray(entries)) continue;

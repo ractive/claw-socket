@@ -68,9 +68,23 @@ export function parseArgs(argv: string[]): CliOptions {
 				noHooks = true;
 				break;
 			case "--install-hooks":
+				if (uninstallHooksOnly) {
+					// biome-ignore lint/suspicious/noConsole: CLI error output before logger is initialised
+					console.error(
+						"--install-hooks and --uninstall-hooks are mutually exclusive",
+					);
+					process.exit(1);
+				}
 				installHooksOnly = true;
 				break;
 			case "--uninstall-hooks":
+				if (installHooksOnly) {
+					// biome-ignore lint/suspicious/noConsole: CLI error output before logger is initialised
+					console.error(
+						"--install-hooks and --uninstall-hooks are mutually exclusive",
+					);
+					process.exit(1);
+				}
 				uninstallHooksOnly = true;
 				break;
 			case "--help":
