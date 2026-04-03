@@ -148,7 +148,7 @@ function makeHookEntry(hookUrl: string): Record<string, unknown> {
 		hooks: [
 			{
 				type: "command",
-				command: `curl -sf --max-time 2 -X POST ${hookUrl} -H 'Content-Type: application/json' -H "Authorization: Bearer $(cat ${TOKEN_FILE})" -d @- >/dev/null 2>&1`,
+				command: `curl -sf --max-time 2 -X POST ${hookUrl} -H 'Content-Type: application/json' -H "Authorization: Bearer $(cat '${TOKEN_FILE}')" -d @- >/dev/null 2>&1`,
 				async: true,
 			},
 		],

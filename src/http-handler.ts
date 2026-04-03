@@ -283,10 +283,7 @@ export async function handleHttpRequest(
 	}
 
 	// --- Per-IP connection limit ---
-	const clientIp =
-		server.requestIP?.(req)?.address ??
-		req.headers.get("x-forwarded-for") ??
-		"unknown";
+	const clientIp = server.requestIP?.(req)?.address ?? "unknown";
 	if (!deps.ipTracker.acquire(clientIp)) {
 		logger.warn("per-IP connection limit reached", { ip: clientIp });
 		return new Response("Too many connections from this IP", { status: 429 });

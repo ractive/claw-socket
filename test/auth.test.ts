@@ -6,9 +6,7 @@
  * read-only endpoints bypass, and --no-auth (authToken: null).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { stat } from "node:fs/promises";
 import { createServer } from "../src/server.ts";
 
 // ---------------------------------------------------------------------------
@@ -61,30 +59,12 @@ function waitForMessages(
 // Token module tests (using isolated temp directory)
 // ---------------------------------------------------------------------------
 
+// Note: these tests operate on the real ~/.claw-socket/token because the module
+// computes TOKEN_PATH at import time from os.homedir(). This is acceptable since
+// the token file is the same one the dev/CI server would use, and tests only
+// read/rotate it (they don't delete it).
 describe("token file I/O", () => {
-	let tmpDir: string;
-	let originalHome: string;
-
-	beforeEach(async () => {
-		tmpDir = join(
-			tmpdir(),
-			`claw-auth-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
-		await mkdir(tmpDir, { recursive: true });
-		originalHome = process.env["HOME"] ?? "";
-		// We cannot easily override homedir() for the auth module,
-		// so we test the module's public API through integration tests below.
-		// Here we test the token format and file behaviour directly.
-	});
-
-	afterEach(async () => {
-		process.env["HOME"] = originalHome;
-		await rm(tmpDir, { recursive: true, force: true });
-	});
-
 	test("ensureToken creates token with correct format", async () => {
-		// We test through the server integration — ensureToken is called by CLI.
-		// Here we verify the contract: 64 hex chars (32 bytes).
 		const { ensureToken, tokenPath } = await import("../src/auth.ts");
 		const token = await ensureToken();
 		expect(token).toMatch(/^[0-9a-f]{64}$/);
@@ -114,7 +94,6 @@ describe("token file I/O", () => {
 		const { ensureToken, tokenPath } = await import("../src/auth.ts");
 		await ensureToken();
 		const s = await stat(tokenPath());
-		// mode & 0o777 gives the permission bits
 		expect(s.mode & 0o777).toBe(0o600);
 	});
 
@@ -131,20 +110,21 @@ describe("token file I/O", () => {
 // Timing-safe token comparison
 // ---------------------------------------------------------------------------
 
-describe("constantTimeEquals", async () => {
-	const { constantTimeEquals } = await import("../src/http-handler.ts");
-
-	test("returns true for identical strings", () => {
+describe("constantTimeEquals", () => {
+	test("returns true for identical strings", async () => {
+		const { constantTimeEquals } = await import("../src/http-handler.ts");
 		expect(constantTimeEquals("abc", "abc")).toBe(true);
 		expect(constantTimeEquals("a".repeat(64), "a".repeat(64))).toBe(true);
 	});
 
-	test("returns false for different strings of same length", () => {
+	test("returns false for different strings of same length", async () => {
+		const { constantTimeEquals } = await import("../src/http-handler.ts");
 		expect(constantTimeEquals("abc", "abd")).toBe(false);
 		expect(constantTimeEquals("a".repeat(64), "b".repeat(64))).toBe(false);
 	});
 
-	test("returns false for different lengths", () => {
+	test("returns false for different lengths", async () => {
+		const { constantTimeEquals } = await import("../src/http-handler.ts");
 		expect(constantTimeEquals("abc", "abcd")).toBe(false);
 		expect(constantTimeEquals("", "a")).toBe(false);
 	});

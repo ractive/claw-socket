@@ -246,8 +246,12 @@ export function createServer(options: ServerOptions = {}) {
 			for (const ws of clients) {
 				if (ws.readyState !== 1 /* OPEN */) continue;
 
-				// Close idle connections (no messages from client in IDLE_TIMEOUT_MS)
-				if (now - ws.data.lastActivityAt > IDLE_TIMEOUT_MS) {
+				// Close connections with no client activity (messages or pong) in IDLE_TIMEOUT_MS
+				const lastLivenessAt = Math.max(
+					ws.data.lastActivityAt,
+					ws.data.lastPingAt ?? 0,
+				);
+				if (now - lastLivenessAt > IDLE_TIMEOUT_MS) {
 					logger.info("closing idle connection");
 					ws.close(1000, "idle timeout");
 					continue;

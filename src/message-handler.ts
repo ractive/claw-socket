@@ -111,8 +111,10 @@ export function handleMessage(
 
 	switch (msg.type) {
 		case "subscribe": {
-			// Check total subscription cap (counting only genuinely new topics)
-			const newTopics = msg.topics.filter((t) => !ws.data.subscriptions.has(t));
+			// Check total subscription cap (de-duplicate and count only genuinely new topics)
+			const newTopics = [...new Set(msg.topics)].filter(
+				(t) => !ws.data.subscriptions.has(t),
+			);
 			if (
 				ws.data.subscriptions.size + newTopics.length >
 				MAX_TOTAL_SUBSCRIPTIONS
