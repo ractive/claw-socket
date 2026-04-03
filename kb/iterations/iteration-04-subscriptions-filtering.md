@@ -5,8 +5,9 @@ tags:
   - iteration
   - subscriptions
   - filtering
-status: done
+status: complete
 iteration: 4
+type: iteration
 ---
 
 # Iteration 04: Subscriptions & Filtering

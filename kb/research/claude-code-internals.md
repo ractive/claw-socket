@@ -1,10 +1,17 @@
 ---
 title: Claude Code Internals — Streamable Data
-description: Comprehensive analysis of all data Claude Code exposes that can be streamed over WebSocket
-tags: [research, claude-code, streaming, events]
+description: >-
+  Comprehensive analysis of all data Claude Code exposes that can be streamed
+  over WebSocket
+tags:
+  - research
+  - claude-code
+  - streaming
+  - events
 status: complete
 date: 2026-04-02
 source: clear-code v2.1.88
+type: research
 ---
 
 # Claude Code Internals — Streamable Data

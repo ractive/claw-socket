@@ -7,6 +7,7 @@ tags:
   - messages
 status: complete
 iteration: 2
+type: iteration
 ---
 
 # Iteration 02: JSONL Parsing & Message Events

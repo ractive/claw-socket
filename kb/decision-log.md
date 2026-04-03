@@ -1,8 +1,11 @@
 ---
 title: Decision Log
 description: Architecture and design decisions for claw-socket
-tags: [decisions]
+tags:
+  - decisions
 date: 2026-04-02
+type: decisions
+status: active
 ---
 
 # Decision Log
@@ -29,16 +32,28 @@ date: 2026-04-02
 ## D002: Use AsyncAPI 3.0 for documentation
 
 **Date**: 2026-04-02
-**Status**: Proposed
+**Status**: Accepted
 
 **Context**: Need Swagger-like docs for WebSocket API.
 
-**Decision**: Write AsyncAPI 3.0 spec, serve docs via `@asyncapi/react-component`.
+**Decision**: Generate AsyncAPI 3.0 spec from Zod schemas at runtime; generate docs with the official `@asyncapi/cli` toolchain.
 
 **Rationale**:
 - Industry standard for event-driven APIs
-- Good ecosystem (React component, HTML template, generators)
 - JSON Schema-based payload validation aligns with Zod
+- `@asyncapi/html-template` (singleFile) produces polished, self-contained HTML served at `/docs`
+- `@asyncapi/markdown-template` produces `kb/docs/api-reference.md` for editor/LLM use
+
+**How docs are generated** (run manually when spec changes):
+```bash
+bun run export-spec   # writes asyncapi.json from the live generator
+asyncapi generate fromTemplate asyncapi.json @asyncapi/html-template@3.5.4 --param singleFile=true -o public --force-write
+asyncapi generate fromTemplate asyncapi.json @asyncapi/markdown-template@2.0.0 --param outFilename=api-reference.md -o kb/docs --force-write
+```
+
+**Note**: `scripts/export-spec.ts` strips `payload` from `messageTraits` before writing because `@asyncapi/specs` 3.0 schema has `additionalProperties: false` on traits and rejects it. Each message already carries the full payload schema directly.
+
+**Note**: `scripts/patch-docs.ts` (step 4, `bun run patch-docs`) fixes a layout bug in `@asyncapi/html-template` where the inner fixed sidebar overflows its `w-64` container by ~66px. Run after step 2.
 
 ---
 

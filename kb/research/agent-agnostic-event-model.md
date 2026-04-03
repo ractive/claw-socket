@@ -1,9 +1,17 @@
 ---
 title: "Agent-Agnostic Event Model: Claude Code + OpenCode"
 date: 2026-04-02
-description: Feasibility analysis for supporting multiple coding agents (Claude Code, OpenCode) with a unified event model
+description: >-
+  Feasibility analysis for supporting multiple coding agents (Claude Code,
+  OpenCode) with a unified event model
 status: complete
-tags: [research, architecture, opencode, claude-code, events]
+tags:
+  - research
+  - architecture
+  - opencode
+  - claude-code
+  - events
+type: research
 ---
 
 # Agent-Agnostic Event Model: Claude Code + OpenCode

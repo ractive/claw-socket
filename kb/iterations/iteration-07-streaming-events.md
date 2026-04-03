@@ -6,8 +6,9 @@ tags:
   - streaming
   - mcp
   - files
-status: done
+status: complete
 iteration: 7
+type: iteration
 ---
 
 # Iteration 07: Real-time Streaming & MCP Events

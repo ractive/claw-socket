@@ -8,8 +8,9 @@ tags:
   - tokens
   - costs
   - usage
-status: done
+status: complete
 iteration: 5
+type: iteration
 ---
 
 # Iteration 05: Token & Cost Tracking

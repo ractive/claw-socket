@@ -2,7 +2,13 @@
 title: WebSocket API Documentation Libraries Research
 date: 2026-04-02
 status: complete
-tags: [asyncapi, websocket, documentation, bun, typescript]
+tags:
+  - asyncapi
+  - websocket
+  - documentation
+  - bun
+  - typescript
+type: research
 ---
 
 # WebSocket API Documentation Libraries for Bun/TypeScript

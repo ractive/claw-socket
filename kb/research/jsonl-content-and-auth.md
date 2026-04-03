@@ -1,10 +1,18 @@
 ---
 title: JSONL Content Coverage & OAuth Token Access
-description: What's in the JSONL files (and what's missing), plus how to access OAuth tokens for CCR
-tags: [research, jsonl, oauth, ccr, auth]
+description: >-
+  What's in the JSONL files (and what's missing), plus how to access OAuth tokens
+  for CCR
+tags:
+  - research
+  - jsonl
+  - oauth
+  - ccr
+  - auth
 status: complete
 date: 2026-04-02
 source: clear-code v2.1.88
+type: research
 ---
 
 # JSONL Content Coverage & OAuth Token Access

@@ -6,8 +6,9 @@ tags:
   - polish
   - packaging
   - cli
-status: done
+status: complete
 iteration: 8
+type: iteration
 ---
 
 # Iteration 08: Polish & Packaging

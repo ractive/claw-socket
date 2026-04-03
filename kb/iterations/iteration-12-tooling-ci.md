@@ -1,9 +1,14 @@
 ---
 title: "Iteration 12: Tooling, CI & Package Quality"
 description: Security scanning, dependency management, CI pipeline, package.json completeness
-tags: [iteration, tooling, ci, dependencies]
-status: done
+tags:
+  - iteration
+  - tooling
+  - ci
+  - dependencies
+status: complete
 iteration: 12
+type: iteration
 ---
 
 # Iteration 12: Tooling, CI & Package Quality
@@ -15,9 +20,9 @@ Add automated security scanning, complete package metadata for npm publishing, h
 
 ### Security scanning
 - [x] Add `bun audit` to quality gates (`bun run check`) — `bun audit` confirmed available in Bun 1.x
-- [ ] Add `gitleaks` config (`.gitleaks.toml`) and document usage for secret scanning
+- [x] Add `gitleaks` config (`.gitleaks.toml`) and document usage for secret scanning
 - [ ] Evaluate and add `semgrep` config for SAST (`semgrep --config auto src/`)
-- [ ] Document security scanning in README (how to run locally)
+- [x] Document security scanning in README (how to run locally)
 
 ### Dependency management
 - [x] Pin `@types/bun` to specific version instead of `latest` — pinned to 1.3.11 (currently installed)
@@ -38,11 +43,11 @@ Add automated security scanning, complete package metadata for npm publishing, h
 - [x] Ensure all new rules pass on existing code — fixed `async fetch` without await in server.ts; added biome-ignore comments in logger.ts and cli.ts for legitimate console use
 
 ### CI pipeline (GitHub Actions)
-- [ ] Create `.github/workflows/ci.yml` with: format, typecheck, test, audit
-- [ ] Add `gitleaks` step to CI
+- [x] Create `.github/workflows/ci.yml` with: format, typecheck, test, audit
+- [x] Add `gitleaks` step to CI
 - [ ] Add optional `semgrep` step to CI
-- [ ] Add build step (`bun build --compile`) to verify binary builds
+- [x] Add build step (`bun build --compile`) to verify binary builds
 
 ### Tests
-- [ ] All quality gates pass with new scanning steps
-- [ ] CI pipeline runs successfully on push
+- [x] All quality gates pass with new scanning steps
+- [x] CI pipeline runs successfully on push
