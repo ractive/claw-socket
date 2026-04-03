@@ -41,3 +41,4 @@ kb/.obsidian/
 
 # Claude Code worktrees
 .claude/worktrees/
+.claude/agent-memory/
