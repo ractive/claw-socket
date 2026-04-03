@@ -10,6 +10,7 @@ interface AsyncApiSpecView {
 		version: string;
 		description: string;
 	};
+	defaultContentType: string;
 	servers: Record<
 		string,
 		{ host: string; protocol: string; description: string }
@@ -17,7 +18,7 @@ interface AsyncApiSpecView {
 	channels: Record<string, unknown>;
 	operations: Record<
 		string,
-		{ action: string; channel: unknown; messages: unknown[] }
+		{ action: string; channel: unknown; messages: unknown[]; reply?: unknown }
 	>;
 	components: {
 		messages: Record<
@@ -26,11 +27,14 @@ interface AsyncApiSpecView {
 				name: string;
 				title: string;
 				summary: string;
+				contentType?: string;
 				payload: unknown;
+				traits?: unknown[];
 				examples?: unknown[];
 			}
 		>;
 		schemas: Record<string, unknown>;
+		messageTraits: Record<string, unknown>;
 	};
 }
 
@@ -54,6 +58,10 @@ describe("generateAsyncApiSpec", () => {
 		expect(info["version"].length).toBeGreaterThan(0);
 	});
 
+	test("sets defaultContentType to application/json", () => {
+		expect(spec["defaultContentType"]).toBe("application/json");
+	});
+
 	test("info description explains how to connect", () => {
 		const desc = spec["info"]["description"];
 		expect(desc).toContain("ws://localhost");
@@ -65,6 +73,13 @@ describe("generateAsyncApiSpec", () => {
 		expect(desc).toContain("session.*");
 		expect(desc).toContain("tool.*");
 		expect(desc).toContain("message.*");
+		expect(desc).toContain("stream.*");
+		expect(desc).toContain("hook.*");
+		expect(desc).toContain("mcp.*");
+		expect(desc).toContain("file.*");
+		expect(desc).toContain("cwd.*");
+		expect(desc).toContain("prompt.*");
+		expect(desc).toContain("system.*");
 	});
 
 	test("info description lists request/response commands", () => {
@@ -74,6 +89,14 @@ describe("generateAsyncApiSpec", () => {
 		expect(desc).toContain("get_session_history");
 		expect(desc).toContain("get_usage");
 		expect(desc).toContain("subscribe_agent_log");
+		expect(desc).toContain("unsubscribe_agent_log");
+		expect(desc).toContain("replay");
+	});
+
+	test("info description explains replay/reconnection", () => {
+		const desc = spec["info"]["description"];
+		expect(desc).toContain("seq");
+		expect(desc).toContain("Replay");
 	});
 
 	test("has localhost WebSocket server defined", () => {
@@ -90,10 +113,17 @@ describe("generateAsyncApiSpec", () => {
 		"session/events",
 		"message/events",
 		"tool/events",
-		"hook/events",
+		"stream/events",
 		"agent/events",
 		"usage/events",
+		"hook/events",
+		"mcp/events",
+		"file/events",
+		"cwd/events",
+		"prompt/events",
+		"system/events",
 		"client/commands",
+		"server/responses",
 	];
 
 	for (const channelKey of expectedChannels) {
@@ -119,10 +149,38 @@ describe("generateAsyncApiSpec", () => {
 		"tool.started",
 		"tool.completed",
 		"tool.failed",
-		// hook
+		// stream
+		"stream.delta",
+		"stream.thinking_delta",
+		"stream.tool_use_delta",
+		// hook (core + summary + all Claude Code hook types)
 		"hook.pre_tool_use",
 		"hook.post_tool_use",
 		"hook.post_tool_use_failure",
+		"hook.started",
+		"hook.completed",
+		"hook.session_start",
+		"hook.session_end",
+		"hook.stop",
+		"hook.subagent_start",
+		"hook.subagent_stop",
+		"hook.teammate_idle",
+		"hook.permission_request",
+		"hook.permission_denied",
+		"hook.notification",
+		"hook.user_prompt_submit",
+		"hook.pre_compact",
+		"hook.post_compact",
+		"hook.elicitation",
+		"hook.elicitation_result",
+		"hook.config_change",
+		"hook.instructions_loaded",
+		"hook.cwd_changed",
+		"hook.file_changed",
+		"hook.task_created",
+		"hook.task_completed",
+		"hook.worktree_create",
+		"hook.worktree_remove",
 		// agent
 		"agent.started",
 		"agent.stopped",
@@ -131,6 +189,26 @@ describe("generateAsyncApiSpec", () => {
 		"usage.update",
 		"usage.rate_limit",
 		"usage.context",
+		// mcp
+		"mcp.server_status",
+		"mcp.elicitation",
+		"mcp.elicitation_result",
+		// file / cwd / prompt / system
+		"file.changed",
+		"cwd.changed",
+		"prompt.suggestion",
+		"system.error",
+		// server responses
+		"snapshot",
+		"subscribed",
+		"unsubscribed",
+		"session_list",
+		"session_history",
+		"usage",
+		"subscribed_agent_log",
+		"unsubscribed_agent_log",
+		"agent_log",
+		"error",
 		// client commands
 		"subscribe",
 		"unsubscribe",
@@ -138,7 +216,9 @@ describe("generateAsyncApiSpec", () => {
 		"get_session_list",
 		"get_session_history",
 		"subscribe_agent_log",
+		"unsubscribe_agent_log",
 		"get_usage",
+		"replay",
 	];
 
 	test("all expected event type messages are present in components", () => {
@@ -166,15 +246,18 @@ describe("generateAsyncApiSpec", () => {
 	test("server event example payloads have envelope shape", () => {
 		const messages = spec["components"]["messages"];
 		for (const [key, msg] of Object.entries(messages)) {
-			// Skip client command messages — they have no timestamp
-			if (key.startsWith("client_commands_")) continue;
+			// Skip non-enveloped messages (client commands and server responses)
+			if (
+				key.startsWith("client_commands__") ||
+				key.startsWith("server_responses__")
+			)
+				continue;
 			const examples = msg["examples"] as
 				| Array<{ payload: Record<string, unknown> }>
 				| undefined;
 			if (!examples) continue;
 			for (const ex of examples) {
 				const p = ex["payload"];
-				// Server events always carry timestamp + sessionId
 				if ("timestamp" in p) {
 					expect(
 						typeof p["timestamp"],
@@ -187,6 +270,33 @@ describe("generateAsyncApiSpec", () => {
 				}
 			}
 		}
+	});
+
+	// ── Message traits ────────────────────────────────────────────────────
+
+	test("eventEnvelope message trait is defined", () => {
+		const traits = spec["components"]["messageTraits"];
+		expect(traits["eventEnvelope"]).toBeDefined();
+	});
+
+	test("server event messages reference the envelope trait", () => {
+		const messages = spec["components"]["messages"];
+		// Pick a known server event
+		const sessionDiscovered = Object.values(messages).find(
+			(m) => m["name"] === "session.discovered",
+		);
+		expect(sessionDiscovered).toBeDefined();
+		expect(sessionDiscovered?.["traits"]).toBeDefined();
+		expect(sessionDiscovered?.["traits"]?.length).toBeGreaterThan(0);
+	});
+
+	test("client command messages do NOT reference the envelope trait", () => {
+		const messages = spec["components"]["messages"];
+		const subscribe = Object.values(messages).find(
+			(m) => m["name"] === "subscribe",
+		);
+		expect(subscribe).toBeDefined();
+		expect(subscribe?.["traits"]).toBeUndefined();
 	});
 
 	// ── Component schemas from Zod ─────────────────────────────────────────
@@ -209,6 +319,8 @@ describe("generateAsyncApiSpec", () => {
 		"ClientMessage",
 		"SubscribeMessage",
 		"UnsubscribeMessage",
+		"UnsubscribeAgentLogMessage",
+		"ReplayMessage",
 	];
 
 	for (const schemaName of expectedSchemas) {
@@ -222,7 +334,6 @@ describe("generateAsyncApiSpec", () => {
 		const schemas = spec["components"]["schemas"];
 		const envSchema = schemas["EventEnvelope"] as Record<string, unknown>;
 		expect(envSchema).toBeDefined();
-		// zodToJsonSchema produces either `type` or `$schema` at the top level
 		const hasType = "type" in envSchema;
 		const hasSchemaRef = "$schema" in envSchema;
 		expect(hasType || hasSchemaRef).toBe(true);
@@ -242,6 +353,15 @@ describe("generateAsyncApiSpec", () => {
 		expect(clientOp?.["action"]).toBe("receive");
 	});
 
+	test("client commands operation has reply referencing server/responses", () => {
+		const ops = spec["operations"];
+		const clientOp = ops["clientCommands"];
+		const reply = clientOp?.["reply"] as Record<string, unknown> | undefined;
+		expect(reply).toBeDefined();
+		const channel = reply?.["channel"] as Record<string, unknown>;
+		expect(channel?.["$ref"]).toBe("#/channels/server~1responses");
+	});
+
 	test("server event operations have action send", () => {
 		const ops = spec["operations"];
 		for (const [key, op] of Object.entries(ops)) {
@@ -249,6 +369,37 @@ describe("generateAsyncApiSpec", () => {
 			expect(op["action"], `operation "${key}" should send`).toBe("send");
 		}
 	});
+
+	test("every channel has a corresponding operation", () => {
+		const ops = spec["operations"];
+		const opChannelRefs = new Set(
+			Object.values(ops).map(
+				(op) => (op["channel"] as Record<string, string>)?.["$ref"],
+			),
+		);
+		for (const channelKey of expectedChannels) {
+			expect(
+				opChannelRefs.has(
+					`#/channels/${channelKey.replace(/~/g, "~0").replace(/\//g, "~1")}`,
+				),
+				`channel "${channelKey}" has no operation`,
+			).toBe(true);
+		}
+	});
+
+	// ── contentType ──────────────────────────────────────────────────────
+
+	test("all component messages have contentType application/json", () => {
+		const messages = spec["components"]["messages"];
+		for (const [key, msg] of Object.entries(messages)) {
+			expect(
+				msg["contentType"],
+				`message "${key}" should have contentType`,
+			).toBe("application/json");
+		}
+	});
+
+	// ── Serialization ─────────────────────────────────────────────────────
 
 	test("spec serializes to valid JSON without throwing", () => {
 		expect(() => JSON.stringify(spec)).not.toThrow();
@@ -303,10 +454,17 @@ describe("/asyncapi.json endpoint", () => {
 			"session/events",
 			"message/events",
 			"tool/events",
+			"stream/events",
 			"hook/events",
 			"agent/events",
 			"usage/events",
+			"mcp/events",
+			"file/events",
+			"cwd/events",
+			"prompt/events",
+			"system/events",
 			"client/commands",
+			"server/responses",
 		]) {
 			expect(
 				channels[ch],
@@ -357,9 +515,9 @@ describe("/docs endpoint", () => {
 		expect(html).toContain("/asyncapi.json");
 	});
 
-	test("page includes AsyncApiComponent.render call", async () => {
+	test("page includes AsyncApiStandalone.render call", async () => {
 		const res = await fetch(`http://localhost:${port}/docs`);
 		const html = await res.text();
-		expect(html).toContain("AsyncApiComponent.render");
+		expect(html).toContain("AsyncApiStandalone.render");
 	});
 });
