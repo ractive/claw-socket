@@ -13,6 +13,16 @@ const MAX_CONCURRENT_HISTORY = 2;
 const REPLAY_RATE_LIMIT_MS = 1_000;
 const MAX_RAW_LOG_SUBSCRIPTIONS = 50;
 
+/** Max messages per rate-limit window before throttling */
+const MSG_RATE_LIMIT = 100;
+/** Rate-limit window duration (ms) */
+const MSG_RATE_WINDOW_MS = 10_000;
+/** Close connection after this many consecutive rate-limit violations */
+const MSG_RATE_MAX_VIOLATIONS = 3;
+
+/** Maximum total topic subscriptions per client */
+const MAX_TOTAL_SUBSCRIPTIONS = 200;
+
 export interface MessageHandlerDeps {
 	safeSend: (ws: ServerWebSocket<ClientData>, msg: string) => void;
 	sendSnapshot: (ws: ServerWebSocket<ClientData>) => void;
@@ -48,6 +58,34 @@ export function handleMessage(
 		onPatternUnsubscribe,
 	} = deps;
 
+	// Update activity timestamp for idle-timeout tracking
+	const now = Date.now();
+	ws.data.lastActivityAt = now;
+
+	// --- Global per-client message rate limit ---
+	if (now - ws.data.messageWindowStart >= MSG_RATE_WINDOW_MS) {
+		// New window — reset counters
+		ws.data.messageCount = 0;
+		ws.data.messageWindowStart = now;
+		ws.data.rateLimitViolations = 0;
+	}
+	ws.data.messageCount++;
+	if (ws.data.messageCount > MSG_RATE_LIMIT) {
+		ws.data.rateLimitViolations++;
+		if (ws.data.rateLimitViolations >= MSG_RATE_MAX_VIOLATIONS) {
+			ws.close(1008, "message rate limit exceeded");
+			return;
+		}
+		safeSend(
+			ws,
+			JSON.stringify({
+				error: "rate_limited",
+				message: `max ${MSG_RATE_LIMIT} messages per ${MSG_RATE_WINDOW_MS / 1000}s`,
+			}),
+		);
+		return;
+	}
+
 	const text = typeof message === "string" ? message : message.toString();
 	let parsed: unknown;
 	try {
@@ -73,6 +111,23 @@ export function handleMessage(
 
 	switch (msg.type) {
 		case "subscribe": {
+			// Check total subscription cap (de-duplicate and count only genuinely new topics)
+			const newTopics = [...new Set(msg.topics)].filter(
+				(t) => !ws.data.subscriptions.has(t),
+			);
+			if (
+				ws.data.subscriptions.size + newTopics.length >
+				MAX_TOTAL_SUBSCRIPTIONS
+			) {
+				safeSend(
+					ws,
+					JSON.stringify({
+						error: "limit_exceeded",
+						message: `max ${MAX_TOTAL_SUBSCRIPTIONS} total subscriptions per client`,
+					}),
+				);
+				break;
+			}
 			for (const topic of msg.topics) {
 				ws.data.subscriptions.add(topic);
 				onPatternSubscribe(ws, topic);

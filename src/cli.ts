@@ -1,3 +1,4 @@
+import { ensureToken, rotateToken, tokenPath } from "./auth.ts";
 import { installHook, uninstallHook } from "./hook-installer.ts";
 import { createLogger, setLogger } from "./logger.ts";
 import { createServer } from "./server.ts";
@@ -11,6 +12,8 @@ Options:
   --host <string>      Hostname to bind (default: localhost, env: CLAW_SOCKET_HOST)
   --verbose            Enable verbose logging
   --no-hooks           Skip hook installation
+  --no-auth            Disable token authentication
+  --rotate-token       Regenerate auth token and exit
   --install-hooks      Install hooks and exit
   --uninstall-hooks    Remove claw-socket hooks from Claude settings and exit
   --help               Show help
@@ -22,6 +25,8 @@ export interface CliOptions {
 	host: string;
 	verbose: boolean;
 	noHooks: boolean;
+	noAuth: boolean;
+	rotateToken: boolean;
 	installHooksOnly: boolean;
 	uninstallHooksOnly: boolean;
 }
@@ -34,6 +39,8 @@ export function parseArgs(argv: string[]): CliOptions {
 	let host = process.env["CLAW_SOCKET_HOST"] ?? "localhost";
 	let verbose = false;
 	let noHooks = false;
+	let noAuth = false;
+	let rotateToken = false;
 	let installHooksOnly = false;
 	let uninstallHooksOnly = false;
 
@@ -66,6 +73,12 @@ export function parseArgs(argv: string[]): CliOptions {
 				break;
 			case "--no-hooks":
 				noHooks = true;
+				break;
+			case "--no-auth":
+				noAuth = true;
+				break;
+			case "--rotate-token":
+				rotateToken = true;
 				break;
 			case "--install-hooks":
 				if (uninstallHooksOnly) {
@@ -104,7 +117,16 @@ export function parseArgs(argv: string[]): CliOptions {
 		}
 	}
 
-	return { port, host, verbose, noHooks, installHooksOnly, uninstallHooksOnly };
+	return {
+		port,
+		host,
+		verbose,
+		noHooks,
+		noAuth,
+		rotateToken,
+		installHooksOnly,
+		uninstallHooksOnly,
+	};
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -116,6 +138,13 @@ export async function runCli(argv: string[]): Promise<void> {
 		structured: false,
 	});
 	setLogger(log);
+
+	// --rotate-token mode: regenerate token and exit
+	if (opts.rotateToken) {
+		const token = await rotateToken();
+		log.info("token rotated", { path: tokenPath(), length: token.length });
+		return;
+	}
 
 	// --install-hooks mode: install and exit
 	if (opts.installHooksOnly) {
@@ -164,7 +193,16 @@ export async function runCli(argv: string[]): Promise<void> {
 		);
 	}
 
-	const app = createServer({ port: opts.port, hostname: opts.host });
+	// Token auth setup
+	let authToken: string | null = null;
+	if (!opts.noAuth) {
+		authToken = await ensureToken();
+		log.info("token auth enabled", { path: tokenPath() });
+	} else {
+		log.warn("token auth disabled (--no-auth)");
+	}
+
+	const app = createServer({ port: opts.port, hostname: opts.host, authToken });
 	await app.start();
 
 	// Install hooks by default unless --no-hooks

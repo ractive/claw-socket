@@ -3,9 +3,15 @@
  *
  * Covers: maxConnections rejection (HTTP 503), oversized WS message handling,
  * Zod error sanitization (no internal fields leaked), unsubscribe_agent_log,
- * replay rate limiting, and CSP header on /docs.
+ * replay rate limiting, CSP header on /docs, origin validation, per-IP limits,
+ * message rate limiting, idle timeout, subscription cap, and /hook rate limiting.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+	HttpRateLimiter,
+	IpConnectionTracker,
+	isAllowedOrigin,
+} from "../src/http-handler.ts";
 import { createServer } from "../src/server.ts";
 
 // ---------------------------------------------------------------------------
@@ -392,5 +398,212 @@ describe("/docs endpoint", () => {
 	test("GET /docs does not include a Content-Security-Policy header", async () => {
 		const res = await fetch(`http://localhost:${port}/docs`);
 		expect(res.headers.get("Content-Security-Policy")).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Origin validation (CSWSH protection)
+// ---------------------------------------------------------------------------
+
+describe("origin validation", () => {
+	test("isAllowedOrigin accepts localhost variants", () => {
+		expect(isAllowedOrigin(null)).toBe(true);
+		expect(isAllowedOrigin("null")).toBe(true);
+		expect(isAllowedOrigin("http://localhost")).toBe(true);
+		expect(isAllowedOrigin("http://localhost:3838")).toBe(true);
+		expect(isAllowedOrigin("http://127.0.0.1")).toBe(true);
+		expect(isAllowedOrigin("http://127.0.0.1:8080")).toBe(true);
+		expect(isAllowedOrigin("http://[::1]")).toBe(true);
+		expect(isAllowedOrigin("http://[::1]:3000")).toBe(true);
+		expect(isAllowedOrigin("https://localhost:443")).toBe(true);
+	});
+
+	test("isAllowedOrigin rejects foreign origins", () => {
+		expect(isAllowedOrigin("http://evil.com")).toBe(false);
+		expect(isAllowedOrigin("https://attacker.io")).toBe(false);
+		expect(isAllowedOrigin("http://localhost.evil.com")).toBe(false);
+		expect(isAllowedOrigin("http://192.168.1.1:3838")).toBe(false);
+	});
+
+	test("WebSocket upgrade with foreign origin returns 403", async () => {
+		const app = createServer({ port: 0 });
+		await app.start();
+		// biome-ignore lint: port is always assigned after Bun.serve
+		const port = app.server.port!;
+
+		try {
+			const res = await fetch(`http://localhost:${port}`, {
+				headers: {
+					Upgrade: "websocket",
+					Connection: "Upgrade",
+					Origin: "http://evil.com",
+				},
+			});
+			expect(res.status).toBe(403);
+		} finally {
+			await app.stop();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Per-IP connection limit
+// ---------------------------------------------------------------------------
+
+describe("per-IP connection limit", () => {
+	test("IpConnectionTracker enforces limit", () => {
+		const tracker = new IpConnectionTracker(2);
+		expect(tracker.acquire("1.2.3.4")).toBe(true);
+		expect(tracker.acquire("1.2.3.4")).toBe(true);
+		expect(tracker.acquire("1.2.3.4")).toBe(false);
+		// Different IP is fine
+		expect(tracker.acquire("5.6.7.8")).toBe(true);
+		// Release frees a slot
+		tracker.release("1.2.3.4");
+		expect(tracker.acquire("1.2.3.4")).toBe(true);
+	});
+
+	test("server rejects connections exceeding per-IP limit", async () => {
+		const app = createServer({ port: 0, maxPerIp: 2 });
+		await app.start();
+		// biome-ignore lint: port is always assigned after Bun.serve
+		const port = app.server.port!;
+
+		try {
+			const { ws: ws1 } = await connectWs(port);
+			const { ws: ws2 } = await connectWs(port);
+
+			// Third connection from same IP should be rejected with 429
+			const res = await fetch(`http://localhost:${port}`, {
+				headers: { Upgrade: "websocket", Connection: "Upgrade" },
+			});
+			expect(res.status).toBe(429);
+
+			ws1.close();
+			ws2.close();
+		} finally {
+			await app.stop();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Global message rate limiting
+// ---------------------------------------------------------------------------
+
+describe("message rate limiting", () => {
+	let app: ReturnType<typeof createServer>;
+	let port: number;
+
+	beforeEach(async () => {
+		app = createServer({ port: 0 });
+		await app.start();
+		// biome-ignore lint: port is always assigned after Bun.serve
+		port = app.server.port!;
+	});
+
+	afterEach(async () => {
+		await app.stop();
+	});
+
+	test("flooding messages triggers rate_limited error", async () => {
+		const { ws, messages } = await connectWs(port);
+		await waitForMessages(messages, 1); // snapshot
+
+		// Send 105 messages rapidly (limit is 100 per 10s window)
+		for (let i = 0; i < 105; i++) {
+			ws.send(JSON.stringify({ type: "get_session_list" }));
+		}
+
+		// Wait for rate limit error to arrive
+		await waitForMessages(messages, messages.length + 1, 5000);
+
+		const hasRateLimited = messages.some(
+			(m) => (m as Record<string, unknown>)["error"] === "rate_limited",
+		);
+		expect(hasRateLimited).toBe(true);
+
+		ws.close();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Per-client total subscription cap
+// ---------------------------------------------------------------------------
+
+describe("subscription cap", () => {
+	let app: ReturnType<typeof createServer>;
+	let port: number;
+
+	beforeEach(async () => {
+		app = createServer({ port: 0 });
+		await app.start();
+		// biome-ignore lint: port is always assigned after Bun.serve
+		port = app.server.port!;
+	});
+
+	afterEach(async () => {
+		await app.stop();
+	});
+
+	test("subscribing beyond 200 total topics returns limit_exceeded", async () => {
+		const { ws, messages } = await connectWs(port);
+		await waitForMessages(messages, 1); // snapshot
+
+		// Subscribe in batches of 100 (max per request)
+		ws.send(
+			JSON.stringify({
+				type: "subscribe",
+				topics: Array.from({ length: 100 }, (_, i) => `topic.a.${i}`),
+			}),
+		);
+		await waitForMessages(messages, 2);
+
+		ws.send(
+			JSON.stringify({
+				type: "subscribe",
+				topics: Array.from({ length: 100 }, (_, i) => `topic.b.${i}`),
+			}),
+		);
+		await waitForMessages(messages, 3);
+
+		// Now at 200 — one more should fail
+		ws.send(
+			JSON.stringify({
+				type: "subscribe",
+				topics: ["topic.overflow"],
+			}),
+		);
+		await waitForMessages(messages, 4);
+
+		const last = messages[3] as Record<string, unknown>;
+		expect(last["error"]).toBe("limit_exceeded");
+
+		ws.close();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// HTTP /hook rate limiting
+// ---------------------------------------------------------------------------
+
+describe("/hook rate limiting", () => {
+	test("HttpRateLimiter enforces window limits", () => {
+		const limiter = new HttpRateLimiter();
+		// Default: 200 per 10s window
+		for (let i = 0; i < 200; i++) {
+			expect(limiter.allow("1.2.3.4")).toBe(true);
+		}
+		expect(limiter.allow("1.2.3.4")).toBe(false);
+		// Different IP is fine
+		expect(limiter.allow("5.6.7.8")).toBe(true);
+	});
+
+	test("cleanup removes stale entries", () => {
+		const limiter = new HttpRateLimiter();
+		limiter.allow("1.2.3.4");
+		// Manually expire by accessing internals isn't needed;
+		// just verify cleanup doesn't throw
+		limiter.cleanup();
 	});
 });

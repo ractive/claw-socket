@@ -26,15 +26,27 @@ Options:
   --host <string>      Hostname to bind (default: localhost, env: CLAW_SOCKET_HOST)
   --verbose            Enable verbose logging
   --no-hooks           Skip hook installation
+  --no-auth            Disable token authentication
+  --rotate-token       Regenerate auth token and exit
   --install-hooks      Install hooks and exit
   --uninstall-hooks    Remove claw-socket hooks from Claude settings and exit
   --help               Show help
   --version            Show version
 ```
 
+## Authentication
+
+claw-socket uses file-based token authentication. On first startup, a 32-byte random hex token is generated and written to `~/.claw-socket/token` (mode 600, directory mode 700). The token is reused across restarts.
+
+- **WebSocket upgrade** requires `?token=<token>` query parameter
+- **POST /hook** requires `Authorization: Bearer <token>` header
+- **GET /health**, **GET /docs**, **GET /asyncapi.json** are unauthenticated
+
+Use `--no-auth` to disable authentication (development/testing). Use `--rotate-token` to regenerate the token and exit (requires server restart).
+
 ## WebSocket protocol
 
-Connect to `ws://localhost:3838`. The server immediately sends a snapshot of all active sessions and agents.
+Connect to `ws://localhost:3838?token=<token>`. The server immediately sends a snapshot of all active sessions and agents.
 
 ### Client messages
 

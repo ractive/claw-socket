@@ -1,5 +1,9 @@
 import type { ServerWebSocket } from "bun";
-import { handleHttpRequest } from "./http-handler.ts";
+import {
+	HttpRateLimiter,
+	handleHttpRequest,
+	IpConnectionTracker,
+} from "./http-handler.ts";
 import { logger } from "./logger.ts";
 import { handleMessage, makeSnapshotSender } from "./message-handler.ts";
 import { envelope } from "./schemas/envelope.ts";
@@ -26,6 +30,9 @@ const PONG_TIMEOUT_MS = 10_000;
 /** Grace period for graceful shutdown (ms) */
 const SHUTDOWN_GRACE_MS = 3_000;
 
+/** Close connections idle for longer than this (ms) — 5 minutes */
+const IDLE_TIMEOUT_MS = 5 * 60_000;
+
 export interface ServerOptions {
 	port?: number;
 	hostname?: string;
@@ -35,6 +42,10 @@ export interface ServerOptions {
 	replayBufferSize?: number;
 	/** Maximum number of simultaneous WebSocket connections (default 100) */
 	maxConnections?: number;
+	/** Maximum WebSocket connections per IP address (default 10) */
+	maxPerIp?: number;
+	/** Shared secret for token auth. null = auth disabled (--no-auth). */
+	authToken?: string | null;
 }
 
 export function createServer(options: ServerOptions = {}) {
@@ -46,6 +57,12 @@ export function createServer(options: ServerOptions = {}) {
 	const replayBufferSize =
 		options.replayBufferSize ?? DEFAULT_REPLAY_BUFFER_SIZE;
 	const maxConnections = options.maxConnections ?? 100;
+	const maxPerIp = options.maxPerIp ?? 10;
+
+	const authToken = options.authToken ?? null;
+
+	const ipTracker = new IpConnectionTracker(maxPerIp);
+	const hookRateLimiter = new HttpRateLimiter();
 
 	const clients = new Set<ServerWebSocket<ClientData>>();
 	const topicIndex = new Map<string, Set<ServerWebSocket<ClientData>>>();
@@ -224,9 +241,23 @@ export function createServer(options: ServerOptions = {}) {
 
 	function startHeartbeat(): void {
 		heartbeatTimer = setInterval(() => {
+			hookRateLimiter.cleanup();
+			const now = Date.now();
 			for (const ws of clients) {
 				if (ws.readyState !== 1 /* OPEN */) continue;
-				ws.data.lastPingAt = Date.now();
+
+				// Close connections with no client activity (messages or pong) in IDLE_TIMEOUT_MS
+				const lastLivenessAt = Math.max(
+					ws.data.lastActivityAt,
+					ws.data.lastPingAt ?? 0,
+				);
+				if (now - lastLivenessAt > IDLE_TIMEOUT_MS) {
+					logger.info("closing idle connection");
+					ws.close(1000, "idle timeout");
+					continue;
+				}
+
+				ws.data.lastPingAt = now;
 				ws.ping();
 				ws.data.pongTimer = setTimeout(() => {
 					logger.warn("client did not respond to ping, closing");
@@ -258,6 +289,9 @@ export function createServer(options: ServerOptions = {}) {
 				broadcast,
 				clientCount: () => clients.size,
 				maxConnections,
+				ipTracker,
+				hookRateLimiter,
+				authToken,
 			});
 		},
 
@@ -276,6 +310,7 @@ export function createServer(options: ServerOptions = {}) {
 				}
 				indexRemoveAll(ws);
 				clients.delete(ws);
+				ipTracker.release(ws.data.remoteAddress);
 				logger.debug("client disconnected", { total: clients.size });
 			},
 

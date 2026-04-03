@@ -139,13 +139,16 @@ async function writeSettings(
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Path to the token file, used for dynamic reads in curl commands */
+const TOKEN_FILE = join(homedir(), ".claw-socket", "token");
+
 function makeHookEntry(hookUrl: string): Record<string, unknown> {
 	return {
 		matcher: "",
 		hooks: [
 			{
 				type: "command",
-				command: `curl -sf --max-time 2 -X POST ${hookUrl} -H 'Content-Type: application/json' -d @- >/dev/null 2>&1`,
+				command: `curl -sf --max-time 2 -X POST ${hookUrl} -H 'Content-Type: application/json' -H "Authorization: Bearer $(cat '${TOKEN_FILE}')" -d @- >/dev/null 2>&1`,
 				async: true,
 			},
 		],
