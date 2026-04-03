@@ -489,20 +489,6 @@ describe("/docs endpoint", () => {
 		app.stop();
 	});
 
-	test("returns 200 with HTML content-type", async () => {
-		const res = await fetch(`http://localhost:${port}/docs`);
-		expect(res.status).toBe(200);
-		expect(res.headers.get("content-type")).toContain("text/html");
-	});
-
-	test("body is an HTML document", async () => {
-		const res = await fetch(`http://localhost:${port}/docs`);
-		const html = await res.text();
-		expect(html).toContain("<!DOCTYPE html>");
-		expect(html).toContain("<html");
-		expect(html).toContain("</html>");
-	});
-
 	test("GET /docs returns HTML or 503 with helpful message", async () => {
 		// public/index.html is generated offline by `bun run export-spec && asyncapi generate ...`
 		// In CI without pre-generated docs the endpoint returns 503; with docs it returns 200.
