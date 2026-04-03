@@ -44,6 +44,38 @@ claw-socket uses file-based token authentication. On first startup, a 32-byte ra
 
 Use `--no-auth` to disable authentication (development/testing). Use `--rotate-token` to regenerate the token and exit (requires server restart).
 
+### Connecting from other projects
+
+Read the token from `~/.claw-socket/token` and pass it as described above:
+
+**Shell / curl:**
+```bash
+TOKEN=$(cat ~/.claw-socket/token)
+# WebSocket (via websocat)
+websocat "ws://localhost:3838?token=$TOKEN"
+# POST /hook
+curl -X POST http://localhost:3838/hook \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"event": "..."}'
+```
+
+**TypeScript / JavaScript:**
+```ts
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+const token = readFileSync(join(homedir(), ".claw-socket", "token"), "utf-8").trim();
+const ws = new WebSocket(`ws://localhost:3838?token=${token}`);
+```
+
+**Python:**
+```python
+from pathlib import Path
+token = (Path.home() / ".claw-socket" / "token").read_text().strip()
+```
+
 ## WebSocket protocol
 
 Connect to `ws://localhost:3838?token=<token>`. The server immediately sends a snapshot of all active sessions and agents.

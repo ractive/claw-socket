@@ -14,4 +14,6 @@ Prefer `hyalo` CLI for operations on files in this directory:
 Fall back to Edit for body prose changes, Write for new files, and Read when
 hyalo doesn't cover the operation (e.g., reading raw markdown for rewriting).
 
+Paths are relative to the vault root (`dir` in `.hyalo.toml`), e.g. `iterations/foo.md` not `kb/iterations/foo.md`.
+
 Use `--format text` for compact output. Run `hyalo <command> --help` if unsure.
