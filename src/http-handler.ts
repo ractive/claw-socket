@@ -16,13 +16,13 @@ function getAsyncApiSpecJson(): string {
 	return asyncApiSpecCache;
 }
 
-const ASYNCAPI_VERSION = "2.6.0";
-// SRI hashes generated from https://unpkg.com/@asyncapi/react-component@2.6.0/...
+const ASYNCAPI_VERSION = "2.5.0";
+// SRI hashes generated from https://unpkg.com/@asyncapi/react-component@2.5.0/...
 // Regenerate with: openssl dgst -sha384 -binary <file> | openssl base64 -A
 const ASYNCAPI_CSS_INTEGRITY =
 	"sha384-LM7ebfJXIA4tw6896yik2GIpLWbNRZYGx44nQNEX1AbDyv8uxgg6bcURopAszNuI";
 const ASYNCAPI_JS_INTEGRITY =
-	"sha384-M8zz0hhlwFOEmmBjisfOzjthn32MZcnOwwkhcx0gLujNCo3uqYTjoizWvPC4NHZQ";
+	"sha384-SI+XJmTQiKs8FckJZ0IuR268Fm+bspAQAWsrPW4T175WnL9Bz96N4+Z9N0yot51n";
 
 const DOCS_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -36,7 +36,7 @@ const DOCS_HTML = `<!DOCTYPE html>
   <div id="asyncapi"></div>
   <script src="https://unpkg.com/@asyncapi/react-component@${ASYNCAPI_VERSION}/browser/standalone/index.js" integrity="${ASYNCAPI_JS_INTEGRITY}" crossorigin="anonymous"></script>
   <script>
-    AsyncApiComponent.render({
+    AsyncApiStandalone.render({
       schema: { url: '/asyncapi.json' },
       config: { show: { sidebar: true } }
     }, document.getElementById('asyncapi'));
@@ -87,7 +87,7 @@ export async function handleHttpRequest(
 			headers: {
 				"Content-Type": "text/html; charset=utf-8",
 				"Content-Security-Policy":
-					"default-src 'none'; style-src https://unpkg.com 'unsafe-inline'; script-src https://unpkg.com 'unsafe-inline'; connect-src 'self'",
+					"default-src 'none'; style-src https://unpkg.com 'unsafe-inline'; script-src https://unpkg.com 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; font-src https://unpkg.com data:; img-src 'self' data: https:; worker-src blob:",
 			},
 		});
 	}

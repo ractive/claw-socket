@@ -386,7 +386,9 @@ describe("/docs CSP header", () => {
 	test("CSP restricts default-src to 'none'", async () => {
 		const res = await fetch(`http://localhost:${port}/docs`);
 		const csp = res.headers.get("Content-Security-Policy") ?? "";
+		// default-src is 'none'; specific directives allow only what's needed
 		expect(csp).toContain("default-src 'none'");
+		expect(csp).toContain("connect-src 'self'");
 	});
 
 	test("CSP allows script-src from unpkg.com only", async () => {
