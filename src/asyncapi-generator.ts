@@ -46,7 +46,7 @@ const toSchema = (schema: Parameters<typeof zodToJsonSchema>[0]) =>
 function enveloped(dataSchema: object): object {
 	return {
 		type: "object",
-		required: ["type", "timestamp", "sessionId", "data"],
+		required: ["type", "timestamp", "sessionId", "seq", "data"],
 		properties: {
 			type: { type: "string" },
 			timestamp: { type: "number", description: "Unix epoch milliseconds" },
@@ -74,6 +74,7 @@ function exEnv(
 		type,
 		timestamp: EXAMPLE_TS,
 		sessionId: EXAMPLE_SESSION_ID,
+		seq: 1,
 		...(agentId ? { agentId } : {}),
 		data,
 	};
